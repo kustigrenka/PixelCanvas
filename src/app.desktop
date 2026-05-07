@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=PixelCanvas
+GenericName=Raster Drawing Application
+Comment=Krita-inspired drawing app with pressure-sensitive stylus support
+Exec=PixelCanvas %f
+Icon=app
+Terminal=false
+Categories=Graphics;2DGraphics;RasterGraphics;
+MimeType=application/x-pixelcanvas;
+Keywords=draw;paint;art;tablet;stylus;
+StartupWMClass=PixelCanvas
