@@ -72,7 +72,6 @@ private:
     QWidget *buildNavigatorWidget();
     QWidget *buildColorWidget();
     QWidget *buildBrushWidget();
-    QWidget *buildPreviewWidget();
 
     // ── Core objects ──────────────────────────────────────────────────────────
     LayerStack    *m_layerStack   = nullptr;
@@ -89,7 +88,6 @@ private:
     QDockWidget   *m_dockNavigator = nullptr;
     QDockWidget   *m_dockColor     = nullptr;
     QDockWidget   *m_dockBrushes   = nullptr;
-    QDockWidget   *m_dockPreview   = nullptr;
     QDockWidget   *m_dockLayers    = nullptr;
 
     // ── Quick bar widgets ─────────────────────────────────────────────────────

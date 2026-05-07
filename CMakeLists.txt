@@ -18,7 +18,6 @@ add_executable(PixelCanvas
     src/CanvasWidget.cpp
     src/BrushEngine.cpp
     src/BrushTip.cpp
-    src/BrushPreviewWidget.cpp      # ← new: extracted from ToolbarPanel.cpp
     src/LayerStack.cpp
     src/UndoStack.cpp
     src/FilterImpls.cpp

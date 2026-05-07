@@ -1,5 +1,4 @@
 #include "ToolbarPanel.h"
-#include "BrushPreviewWidget.h"
 #include "ColorWheelWidget.h"
 
 #include <QVBoxLayout>
@@ -65,7 +64,6 @@ void ToolbarPanel::ensureBuilt()
     buildColorSection();
     buildSwatchRow();
     buildBrushBody();
-    buildPreviewArea();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -90,12 +88,6 @@ QWidget *ToolbarPanel::takeBrushBody()
     return m_brushBody;
 }
 
-QWidget *ToolbarPanel::takePreviewWidget()
-{
-    ensureBuilt();
-    return m_preview;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Section builders
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,9 +99,6 @@ void ToolbarPanel::buildColorSection()
         m_primary = c;
         updateColorSquares();
         emit colorChanged(m_primary);
-        if (m_preview)
-            m_preview->updatePreview(m_primary, m_settings.size,
-                                     m_settings.opacity, m_settings.hardness);
     });
 }
 
@@ -307,13 +296,6 @@ void ToolbarPanel::buildBrushBody()
     root->addStretch();
 }
 
-void ToolbarPanel::buildPreviewArea()
-{
-    m_preview = new BrushPreviewWidget(nullptr);
-    m_preview->updatePreview(m_primary, m_settings.size,
-                              m_settings.opacity, m_settings.hardness);
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -328,9 +310,6 @@ void ToolbarPanel::updateColorSquares()
 
 void ToolbarPanel::emitSettings()
 {
-    if (m_preview)
-        m_preview->updatePreview(m_primary, m_settings.size,
-                                  m_settings.opacity, m_settings.hardness);
     emit brushSettingsChanged(m_settings);
 }
 

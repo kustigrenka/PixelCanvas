@@ -70,12 +70,8 @@ void MainWindow::buildDocks()
     makeDock(tr("Brushes"),   buildBrushWidget(),
              Qt::RightDockWidgetArea, m_dockBrushes,   220);
 
-    makeDock(tr("Preview"),   buildPreviewWidget(),
-             Qt::RightDockWidgetArea, m_dockPreview,   220);
-
     splitDockWidget(m_dockNavigator, m_dockLayers,   Qt::Vertical);
     splitDockWidget(m_dockColor,     m_dockBrushes,  Qt::Vertical);
-    splitDockWidget(m_dockBrushes,   m_dockPreview,  Qt::Vertical);
 
     // Populate Window menu
     for (QObject *obj : menuBar()->children()) {
@@ -86,7 +82,6 @@ void MainWindow::buildDocks()
                 menu->addSeparator();
                 menu->addAction(m_dockColor->toggleViewAction());
                 menu->addAction(m_dockBrushes->toggleViewAction());
-                menu->addAction(m_dockPreview->toggleViewAction());
                 break;
             }
         }
@@ -225,22 +220,4 @@ QWidget *MainWindow::buildBrushWidget()
     return scroll;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Preview widget  –  live stroke preview bar
-// ─────────────────────────────────────────────────────────────────────────────
-QWidget *MainWindow::buildPreviewWidget()
-{
-    auto *preview = m_toolbar->takePreviewWidget();
 
-    auto *w = new QWidget(this);
-    auto *l = new QVBoxLayout(w);
-    l->setContentsMargins(4, 4, 4, 4);
-    l->setSpacing(0);
-
-    if (preview) {
-        preview->setParent(w);
-        l->addWidget(preview);
-    }
-    l->addStretch();
-    return w;
-}

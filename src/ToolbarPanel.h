@@ -7,7 +7,6 @@
 #include "BrushSettings.h"       // ← replaces the old BrushEngine.h include
 
 class ColorWheelWidget;
-class BrushPreviewWidget;        // ← forward-declare; defined in BrushPreviewWidget.h
 class QListWidget;
 class QSpinBox;
 class QSlider;
@@ -42,7 +41,6 @@ public:
     ColorWheelWidget   *takeColorWheel();
     QWidget            *takeSwatchRow(QWidget *newParent);
     QWidget            *takeBrushBody();
-    QWidget            *takePreviewWidget();
 
     // Keyboard shortcut API
     void selectTool(Tool t);
@@ -68,7 +66,6 @@ private:
     void buildColorSection();
     void buildSwatchRow();
     void buildBrushBody();
-    void buildPreviewArea();
     void updateColorSquares();
     void emitSettings();
 
@@ -96,9 +93,6 @@ private:
     QSpinBox           *m_opacitySpin     = nullptr;
     QSlider            *m_hardnessSlider  = nullptr;
     QSpinBox           *m_hardnessSpin    = nullptr;
-
-    // ── Preview ───────────────────────────────────────────────────────────────
-    BrushPreviewWidget *m_preview         = nullptr;
 
     // ── Tool state ────────────────────────────────────────────────────────────
     Tool           m_activeTool  = Tool::Brush;
