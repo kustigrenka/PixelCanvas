@@ -1,5 +1,4 @@
 #include "BrushTip.h"
-#include <QDebug>
 
 // ─── PixelTip ─────────────────────────────────────────────────────────────────
 void PixelTip::stamp(QPainter &p, const DabParams &dab)
@@ -15,7 +14,6 @@ void PixelTip::stamp(QPainter &p, const DabParams &dab)
     mask.fill(Qt::transparent);
 
     const int baseA = static_cast<int>(dab.opacity * 255.0f);
-    qDebug() << "baseA:" << baseA << "opacity:" << dab.opacity;
     const QColor &c = dab.color;
 
     for (int y = 0; y < d; ++y)

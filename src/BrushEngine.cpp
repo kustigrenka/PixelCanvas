@@ -3,7 +3,6 @@
 #include <QPainter>
 #include <cmath>
 #include <algorithm>
-#include <QDebug> 
 
 // ─────────────────────────────────────────────────────────────────────────────
 BrushEngine::BrushEngine(QObject *parent)
@@ -186,7 +185,6 @@ QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
                         + (1.0f - m_settings.minSizeFraction) * pressure;
     const float opacityMul = 1.0f - m_settings.opacityDynamics * (1.0f - pressure);
     
-    qDebug() << "pressure:" << pressure << "opacityDynamics:" << m_settings.opacityDynamics << "opacityMul:" << opacityMul;
     DabParams dab;
     dab.center   = pos;
     dab.diameter = m_settings.size * sizeMul;

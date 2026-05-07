@@ -325,8 +325,12 @@ void CanvasWidget::mousePressEvent(QMouseEvent *e)
 void CanvasWidget::mouseMoveEvent(QMouseEvent *e)
 {
     if (m_tabletInUse) return;
+    const QPointF prev = m_cursorPos;
     m_cursorPos = e->position();
-    update();   // repaint cursor circle
+    // Repaint only the small regions around old and new cursor positions
+    const float r = m_brushEngine->settings().size * m_zoom * 0.5f + 4.0f;
+    update(QRectF(prev        - QPointF(r, r), QSizeF(r * 2, r * 2)).toAlignedRect());
+    update(QRectF(m_cursorPos - QPointF(r, r), QSizeF(r * 2, r * 2)).toAlignedRect());
     pointerUpdate(e->position(), 1.0f, 0.f, 0.f, 0.f);
 }
 
