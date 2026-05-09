@@ -20,7 +20,8 @@ class QDockWidget;
 class QAction;
 class ColorWheelWidget;
 class ColorPanelWidget;
-
+class PinterestWindow;
+class MannequinWindow;
 
 class MainWindow : public QMainWindow
 {
@@ -88,7 +89,7 @@ private:
     CanvasWidget  *m_canvas       = nullptr;
     ToolbarPanel  *m_toolbar      = nullptr;
     LayerPanel    *m_layerPanel   = nullptr;
-        ColorPanelWidget  *m_colorPanel   = nullptr;
+    ColorPanelWidget  *m_colorPanel   = nullptr;
 
 
     // ── Docks ─────────────────────────────────────────────────────────────────
@@ -96,6 +97,10 @@ private:
     QDockWidget   *m_dockColor     = nullptr;
     QDockWidget   *m_dockBrushes   = nullptr;
     QDockWidget   *m_dockLayers    = nullptr;
+
+    // ── References floating windows (created lazily on first open) ────────────
+    PinterestWindow *m_pinterestWin = nullptr;
+    MannequinWindow *m_mannequinWin = nullptr;
 
     // ── Quick bar widgets ─────────────────────────────────────────────────────
     QToolBar      *m_quickBar     = nullptr;
