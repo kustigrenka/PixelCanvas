@@ -27,6 +27,7 @@ struct DabParams
     float    uncolorPressure = 0.0f;
     float    blurWidth       = 0.5f;
     bool     keepOpacity     = false;
+    int      brushShape      = 0;   // 0=Circle  1=Diamond  2=Square
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

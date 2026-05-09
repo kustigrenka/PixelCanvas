@@ -342,17 +342,22 @@ void ToolbarPanel::buildBrushBody()
 
     root->addWidget(makeSep(m_brushBody));
 
-    //  3. Shape selector (dropdown) 
+    //  3. Shape panel — selector + BMP import in one group 
     m_shapeRow = new QWidget(m_brushBody);
-    auto *shapeLayout = new QHBoxLayout(m_shapeRow);
+    auto *shapeGroupLayout = new QVBoxLayout(m_shapeRow);
+    shapeGroupLayout->setContentsMargins(0,0,0,0); shapeGroupLayout->setSpacing(3);
+
+    // Row A: Shape dropdown (Circle / Diamond / Square)
+    auto *shapeTopRow = new QWidget(m_shapeRow);
+    auto *shapeLayout = new QHBoxLayout(shapeTopRow);
     shapeLayout->setContentsMargins(0,0,0,0); shapeLayout->setSpacing(4);
 
-    auto *shapeLbl = new QLabel(tr("Shape"), m_shapeRow);
+    auto *shapeLbl = new QLabel(tr("Shape"), shapeTopRow);
     shapeLbl->setStyleSheet("color:#ccc; font-size:11px;");
     shapeLbl->setFixedWidth(80);
     shapeLayout->addWidget(shapeLbl);
 
-    auto *shapeCombo = new QComboBox(m_shapeRow);
+    auto *shapeCombo = new QComboBox(shapeTopRow);
     shapeCombo->addItems({tr("Circle"), tr("Diamond"), tr("Square")});
     shapeCombo->setCurrentIndex(0);
     shapeCombo->setStyleSheet(
@@ -362,9 +367,89 @@ void ToolbarPanel::buildBrushBody()
         "QComboBox QAbstractItemView{background:#2d2d2d;color:#ccc;selection-background-color:#4a6fa5;}");
     connect(shapeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ToolbarPanel::onShapeChanged);
-    // Keep m_shapeBtns empty — we no longer use toggle buttons
     shapeLayout->addWidget(shapeCombo, 1);
+    shapeGroupLayout->addWidget(shapeTopRow);
+
+    // Row B: Shape BMP import (replaces circle with bitmap mask)
+    auto *shapeBmpRow = new QWidget(m_shapeRow);
+    auto *shapeBmpLayout = new QHBoxLayout(shapeBmpRow);
+    shapeBmpLayout->setContentsMargins(0,0,0,0); shapeBmpLayout->setSpacing(4);
+
+    auto *shapeBmpLbl = new QLabel(tr("Shape BMP"), shapeBmpRow);
+    shapeBmpLbl->setStyleSheet("color:#ccc; font-size:11px;");
+    shapeBmpLbl->setFixedWidth(80);
+    shapeBmpLayout->addWidget(shapeBmpLbl);
+
+    auto *shapeImportCombo = new QComboBox(shapeBmpRow);
+    shapeImportCombo->addItem(tr("Default (circle)"));
+    shapeImportCombo->setStyleSheet(
+        "QComboBox{background:#2d2d2d;border:1px solid #555;color:#ccc;"
+        "border-radius:2px;padding:1px 4px;font-size:11px;}"
+        "QComboBox::drop-down{border:none;}"
+        "QComboBox QAbstractItemView{background:#2d2d2d;color:#ccc;"
+        "selection-background-color:#4a6fa5;}");
+
+    const QString shapeDir = QStandardPaths::writableLocation(
+        QStandardPaths::AppLocalDataLocation) + "/brush_shapes/";
+    QDir(shapeDir).mkpath(".");
+    for (const QString &f : QDir(shapeDir).entryList({"*.bmp","*.png"}, QDir::Files))
+        shapeImportCombo->addItem(QFileInfo(f).baseName(), shapeDir + f);
+
+    connect(shapeImportCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this, shapeImportCombo](int idx) {
+        const QString path = shapeImportCombo->itemData(idx).toString();
+        if (m_brushEngine) m_brushEngine->setTipShape(path);
+        // Sync m_settings.spacing to the auto-adjusted value in BrushEngine
+        if (m_brushEngine)
+            m_settings.spacing = m_brushEngine->settings().spacing;
+        saveUIIntoSlot(m_activeSlot);
+        updatePreview();
+        emitSettings();
+    });
+    shapeBmpLayout->addWidget(shapeImportCombo, 1);
+
+    // Import button
+    auto *importShapeBtn = new QToolButton(shapeBmpRow);
+    importShapeBtn->setText("…");
+    importShapeBtn->setToolTip(tr("Import brush shape BMP/PNG"));
+    connect(importShapeBtn, &QToolButton::clicked, this, [this, shapeImportCombo] {
+        const QString src = QFileDialog::getOpenFileName(
+            nullptr, tr("Import Brush Shape"), {},
+            tr("Images (*.bmp *.png)"));
+        if (src.isEmpty()) return;
+        const QString dest = QStandardPaths::writableLocation(
+            QStandardPaths::AppLocalDataLocation)
+            + "/brush_shapes/" + QFileInfo(src).fileName();
+        QFile::copy(src, dest);
+        shapeImportCombo->addItem(QFileInfo(src).baseName(), dest);
+        shapeImportCombo->setCurrentIndex(shapeImportCombo->count() - 1);
+    });
+    shapeBmpLayout->addWidget(importShapeBtn);
+
+    // Delete button — removes the selected custom shape file and combo entry
+    auto *deleteShapeBtn = new QToolButton(shapeBmpRow);
+    deleteShapeBtn->setText("✕");
+    deleteShapeBtn->setToolTip(tr("Delete selected shape"));
+    deleteShapeBtn->setFixedWidth(22);
+    deleteShapeBtn->setStyleSheet(
+        "QToolButton{background:#5a2020;border:1px solid #844;color:#fcc;"
+        "border-radius:2px;font-size:10px;}"
+        "QToolButton:hover{background:#7a2020;}");
+    connect(deleteShapeBtn, &QToolButton::clicked, this, [this, shapeImportCombo] {
+        const int idx = shapeImportCombo->currentIndex();
+        if (idx <= 0) return;   // index 0 = "Default (circle)", not deletable
+        const QString path = shapeImportCombo->itemData(idx).toString();
+        if (!path.isEmpty()) QFile::remove(path);
+        shapeImportCombo->removeItem(idx);
+        // Reset to default circle
+        shapeImportCombo->setCurrentIndex(0);
+        if (m_brushEngine) m_brushEngine->setTipShape({});
+    });
+    shapeBmpLayout->addWidget(deleteShapeBtn);
+
+    shapeGroupLayout->addWidget(shapeBmpRow);
     root->addWidget(m_shapeRow);
+
     // Store combo pointer for loadSlotIntoUI
     m_shapeRow->setProperty("shapeCombo", QVariant::fromValue(static_cast<QObject*>(shapeCombo)));
 
@@ -399,6 +484,7 @@ void ToolbarPanel::buildBrushBody()
             this, [this, texCombo](int idx) {
         const QString path = texCombo->itemData(idx).toString();
         if (m_brushEngine) m_brushEngine->setTipTexture(path);
+        updatePreview();
     });
     texLayout->addWidget(texCombo, 1);
 
@@ -419,51 +505,6 @@ void ToolbarPanel::buildBrushBody()
     });
     texLayout->addWidget(importTexBtn);
     root->addWidget(m_textureRow);
-
-    //  4b. Shape import row 
-    auto *shapeImportRow = new QWidget(m_brushBody);
-    auto *shapeImportLayout = new QHBoxLayout(shapeImportRow);
-    shapeImportLayout->setContentsMargins(0,0,0,0); shapeImportLayout->setSpacing(4);
-
-    auto *shapeImportLbl = new QLabel(tr("Shape BMP"), shapeImportRow);
-    shapeImportLbl->setStyleSheet("color:#ccc; font-size:11px;");
-    shapeImportLbl->setFixedWidth(80);
-    shapeImportLayout->addWidget(shapeImportLbl);
-
-    auto *shapeImportCombo = new QComboBox(shapeImportRow);
-    shapeImportCombo->addItem(tr("Default (circle)"));
-    shapeImportCombo->setStyleSheet(comboStyle);
-
-    const QString shapeDir = QStandardPaths::writableLocation(
-        QStandardPaths::AppLocalDataLocation) + "/brush_shapes/";
-    QDir(shapeDir).mkpath(".");
-    for (const QString &f : QDir(shapeDir).entryList({"*.bmp","*.png"}, QDir::Files))
-        shapeImportCombo->addItem(QFileInfo(f).baseName(), shapeDir + f);
-
-    connect(shapeImportCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this, shapeImportCombo](int idx) {
-        const QString path = shapeImportCombo->itemData(idx).toString();
-        if (m_brushEngine) m_brushEngine->setTipShape(path);
-    });
-    shapeImportLayout->addWidget(shapeImportCombo, 1);
-
-    auto *importShapeBtn = new QToolButton(shapeImportRow);
-    importShapeBtn->setText("…");
-    importShapeBtn->setToolTip(tr("Import brush shape BMP/PNG"));
-    connect(importShapeBtn, &QToolButton::clicked, this, [this, shapeImportCombo] {
-        const QString src = QFileDialog::getOpenFileName(
-            nullptr, tr("Import Brush Shape"), {},
-            tr("Images (*.bmp *.png)"));
-        if (src.isEmpty()) return;
-        const QString dest = QStandardPaths::writableLocation(
-            QStandardPaths::AppLocalDataLocation)
-            + "/brush_shapes/" + QFileInfo(src).fileName();
-        QFile::copy(src, dest);
-        shapeImportCombo->addItem(QFileInfo(src).baseName(), dest);
-        shapeImportCombo->setCurrentIndex(shapeImportCombo->count() - 1);
-    });
-    shapeImportLayout->addWidget(importShapeBtn);
-    root->addWidget(shapeImportRow);
 
     root->addWidget(makeSep(m_brushBody));
 
@@ -771,32 +812,44 @@ void ToolbarPanel::updatePreview()
     QImage img(W, H, QImage::Format_ARGB32_Premultiplied);
     img.fill(QColor("#111"));
 
-    if (m_brushEngine && !m_slots[m_activeSlot].empty) {
+    if (!m_slots[m_activeSlot].empty) {
         const BrushSettings &s = m_settings;
         const TipType tt = s.tipType;
 
-        // Only render a stroke preview for brush types that actually draw
         const bool canDraw = (tt != TipType::Bucket && tt != TipType::Gradient &&
                               tt != TipType::SelPen  && tt != TipType::SelEraser);
 
         if (canDraw) {
-            // Build a temporary BrushEngine-like renderer directly using tip
-            // to avoid touching the real canvas. We use the existing tip classes.
-            BrushSettings previewSettings = s;
-            previewSettings.size = std::min(s.effectiveDiameter(), (float)(H - 8));
-            previewSettings.sizeMultiplier = 1.0f;
+            // Cap preview size so it fits the preview strip
+            BrushSettings ps = s;
+            ps.size = std::min(s.effectiveDiameter(), (float)(H - 8));
+            ps.sizeMultiplier = 1.0f;
 
-            // Draw a horizontal wavy stroke across the preview image
-            const float cy = H * 0.5f;
-            const float r  = previewSettings.size * 0.5f;
+            const float cy      = H * 0.5f;
+            const float r       = ps.size * 0.5f;
             const float spacing = std::max(r * s.spacing, 1.0f);
 
-            // Create a tip matching the current type
+            // Build the correct tip for the current type, mirroring BrushEngine::applyTipType
             BrushTip *tip = nullptr;
             switch (tt) {
-            case TipType::Airbrush:   tip = new AirbrushTip;  break;
-            case TipType::Eraser:     tip = new EraserTip;    break;
-            default:                  tip = new PixelTip;     break;
+            case TipType::Airbrush:   tip = new AirbrushTip;   break;
+            case TipType::Eraser:     tip = new EraserTip;     break;
+            case TipType::Brush:      tip = new BrushTipWet;   break;
+            case TipType::WaterColor: tip = new WaterColorTip; break;
+            case TipType::Marker:     tip = new MarkerTip;     break;
+            case TipType::Smudge:     tip = new SmudgeTip;     break;
+            case TipType::Blur:       tip = new BlurTip;       break;
+            case TipType::Chalk:      tip = new ChalkTip;      break;
+            default:
+                // Pixel — use TextureTip if a shape BMP is active, else PixelTip
+                if (m_brushEngine) {
+                    const QString shapePath = m_brushEngine->currentShapePath();
+                    const QString texPath   = m_brushEngine->currentTexturePath();
+                    if (!shapePath.isEmpty() || !texPath.isEmpty())
+                        tip = new TextureTip(texPath, shapePath);
+                }
+                if (!tip) tip = new PixelTip;
+                break;
             }
 
             QPainter p(&img);
@@ -804,20 +857,29 @@ void ToolbarPanel::updatePreview()
                                  ? QPainter::CompositionMode_DestinationOut
                                  : QPainter::CompositionMode_SourceOver);
 
+            if (tip) tip->beginStroke();
+
             DabParams dab;
-            dab.diameter = previewSettings.size;
-            dab.hardness = s.hardness;
-            dab.opacity  = s.opacity;
-            dab.pressure = 1.0f;
-            dab.color    = m_primary;
-            dab.blending = s.blending;
-            dab.dilution = s.dilution;
+            dab.diameter        = ps.size;
+            dab.hardness        = s.hardness;
+            dab.opacity         = s.opacity;
+            dab.pressure        = 1.0f;
+            dab.color           = m_primary;
+            dab.blending        = s.blending;
+            dab.dilution        = s.dilution;
+            dab.persistence     = s.persistence;
+            dab.blurPressure    = s.blurPressure;
+            dab.coloring        = s.coloring;
+            dab.uncolorPressure = s.uncolorPressure;
+            dab.blurWidth       = s.blurWidth;
+            dab.keepOpacity     = s.keepOpacity;
+            dab.brushShape      = s.brushShape;
 
             float x = r;
             while (x < W - r) {
                 const float wave = std::sin(x * 0.05f) * (H * 0.18f);
                 dab.center = QPointF(x, cy + wave);
-                tip->stamp(p, dab);
+                if (tip) tip->stamp(p, dab);
                 x += spacing;
             }
             p.end();
@@ -928,43 +990,44 @@ void ToolbarPanel::onSizeChanged(int v)
 { m_settings.size=(float)v; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
 void ToolbarPanel::onMinSizeChanged(int v)
-{ m_settings.minSizeFraction=v/100.0f; saveUIIntoSlot(m_activeSlot); emitSettings(); }
+{ m_settings.minSizeFraction=v/100.0f; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
 void ToolbarPanel::onOpacityChanged(int v)
 { m_settings.opacity=v/100.0f; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
 void ToolbarPanel::onMinOpacityChanged(int v)
-{ m_settings.minOpacity=v/100.0f; saveUIIntoSlot(m_activeSlot); emitSettings(); }
+{ m_settings.minOpacity=v/100.0f; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
 void ToolbarPanel::onHardnessChanged(int v)
 { m_settings.hardness=v/100.0f; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
 void ToolbarPanel::onBlendingChanged(int v)
-{ m_settings.blending=v/100.0f; saveUIIntoSlot(m_activeSlot); emitSettings(); }
+{ m_settings.blending=v/100.0f; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
 void ToolbarPanel::onDilutionChanged(int v)
-{ m_settings.dilution=v/100.0f; saveUIIntoSlot(m_activeSlot); emitSettings(); }
+{ m_settings.dilution=v/100.0f; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
 void ToolbarPanel::onPersistenceChanged(int v)
-{ m_settings.persistence=v/100.0f; saveUIIntoSlot(m_activeSlot); emitSettings(); }
+{ m_settings.persistence=v/100.0f; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
 void ToolbarPanel::onBlurPressureChanged(int v)
-{ m_settings.blurPressure=v/100.0f; saveUIIntoSlot(m_activeSlot); emitSettings(); }
+{ m_settings.blurPressure=v/100.0f; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
 void ToolbarPanel::onColoringChanged(int v)
-{ m_settings.coloring=v/100.0f; saveUIIntoSlot(m_activeSlot); emitSettings(); }
+{ m_settings.coloring=v/100.0f; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
 void ToolbarPanel::onUncolorPressureChanged(int v)
-{ m_settings.uncolorPressure=v/100.0f; saveUIIntoSlot(m_activeSlot); emitSettings(); }
+{ m_settings.uncolorPressure=v/100.0f; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
 void ToolbarPanel::onBlurWidthChanged(int v)
-{ m_settings.blurWidth=v/100.0f; saveUIIntoSlot(m_activeSlot); emitSettings(); }
+{ m_settings.blurWidth=v/100.0f; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
 void ToolbarPanel::onShapeChanged(int shape)
 {
     m_activeShape = shape;
     m_settings.brushShape = shape;
     saveUIIntoSlot(m_activeSlot);
+    updatePreview();
     emitSettings();
 }
 

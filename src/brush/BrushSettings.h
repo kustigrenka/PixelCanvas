@@ -24,7 +24,7 @@ struct BrushSettings
     float minOpacity      = 0.0f;
     float hardness        = 0.90f;
     float spacing         = 0.08f;
-    float smoothing       = 0.70f;
+    float smoothing       = 0.0f;   // 0=no stabilisation, 1=maximum lag
 
     BrushBlendMode blendMode  = BrushBlendMode::Normal;
     bool           keepOpacity = false;
@@ -92,6 +92,7 @@ struct BrushPreset
         p.settings.tipType=TipType::Pixel;
         p.settings.size=10.0f; p.settings.sizeMultiplier=1.0f;
         p.settings.hardness=0.95f; p.settings.spacing=0.05f;
+        p.settings.smoothing=0.0f;
         return p;
     }
     static BrushPreset makeAirbrush()

@@ -42,6 +42,10 @@ public:
     void setTipTexture(const QString &path);
     void setTipShape(const QString &path);
 
+    // Accessors for the current imported paths (used by the preview renderer)
+    const QString &currentShapePath()   const { return m_tipShapePath; }
+    const QString &currentTexturePath() const { return m_tipTexturePath; }
+
     // ── Stroke pipeline ───────────────────────────────────────────────────────
     void  beginStroke();
     QRect addSample(const StrokeSample &s);
@@ -58,8 +62,6 @@ signals:
 
 private:
     QRect   stampDab(const QPointF &pos, float pressure);
-    static  QPointF catmullRom(const QPointF &p0, const QPointF &p1,
-                                const QPointF &p2, const QPointF &p3, float t);
     void applyTipType(const BrushSettings &s);
 
     // ── Preset list ───────────────────────────────────────────────────────────
@@ -81,6 +83,31 @@ private:
     // ── Persistent stroke painter ─────────────────────────────────────────────
     QPainter      *m_painter = nullptr;
 
+    // ── Scratch layer (dry-media stroke accumulation fix) ─────────────────────
+    // Dry tips (Pixel, Eraser, Chalk, Texture) draw onto this transparent image
+    // during a stroke so overlapping dabs don't stack up opacity.
+    // On endStroke it is composited onto m_layer once with SourceOver.
+    QImage         m_strokeScratch;
+    bool           m_useScratch = false;
+
+    // Returns true for tip types that draw opaque/flat colour and must not
+    // accumulate alpha across overlapping dabs within a single stroke.
+    bool isDryTip() const {
+        return m_settings.tipType == TipType::Pixel    ||
+               m_settings.tipType == TipType::Eraser   ||
+               m_settings.tipType == TipType::SelEraser ||
+               m_settings.tipType == TipType::Chalk    ||
+               (m_tip && dynamic_cast<TextureTip*>(m_tip) != nullptr);
+    }
+
+public:
+    // Expose the scratch layer so CanvasWidget can include it in recomposite
+    // during an active stroke (for correct live preview).
+    const QImage  *strokeScratch()  const { return m_useScratch ? &m_strokeScratch : nullptr; }
+    bool           hasScratch()     const { return m_useScratch && !m_strokeScratch.isNull(); }
+
+private:
+
     // ── Per-stroke state ──────────────────────────────────────────────────────
     bool    m_inStroke     = false;
     float   m_distAccum    = 0.0f;
@@ -88,9 +115,7 @@ private:
     QPointF m_lastRaw;
     QPointF m_lastSmoothed;
 
-    static constexpr int kCRBuf = 4;
-    QPointF m_crBuf[kCRBuf];
-    int     m_crCount = 0;
+    int     m_crCount = 0;   // sample counter, reset each stroke
 
     QPainter::CompositionMode m_compMode = QPainter::CompositionMode_SourceOver;
 };

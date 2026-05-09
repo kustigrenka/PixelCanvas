@@ -188,6 +188,21 @@ void CanvasWidget::recompositeRect(const QRect &dirty)
 
     m_layerStack->recompositeRect(m_composited, dirty);
 
+    // During a dry-media stroke, blend the scratch layer on top of the
+    // composited view so the user sees the stroke before it is committed
+    // to the real layer on endStroke.
+    if (m_drawing && m_brushEngine->hasScratch())
+    {
+        const QImage *scratch = m_brushEngine->strokeScratch();
+        if (scratch && !scratch->isNull())
+        {
+            QPainter sp(&m_composited);
+            sp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+            sp.setOpacity(static_cast<double>(m_brushEngine->settings().opacity));
+            sp.drawImage(dirty, *scratch, dirty);
+        }
+    }
+
     if (m_drawing)
         m_brushEngine->resumeStrokePainter();
 

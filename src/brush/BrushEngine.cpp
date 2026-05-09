@@ -185,6 +185,42 @@ void BrushEngine::setTipShape(const QString &path)
     {
         tt->setShape(path);
     }
+
+    // Auto-set spacing based on BMP ink coverage so dabs always fill in.
+    // Sparse BMPs (bristle, streak) need very tight spacing so marks from
+    // adjacent dabs overlap and cover the gaps between them.
+    if (!path.isEmpty())
+    {
+        float newSpacing = 0.03f;
+        QImage bmp(path);
+        if (!bmp.isNull())
+        {
+            const QImage gray = bmp.convertToFormat(QImage::Format_Grayscale8);
+            int ink = 0, total = gray.width() * gray.height();
+            for (int y = 0; y < gray.height(); ++y) {
+                const uchar *row = gray.constScanLine(y);
+                for (int x = 0; x < gray.width(); ++x)
+                    if (row[x] < 128) ++ink;
+            }
+            const float cov = total > 0 ? float(ink) / float(total) : 0.f;
+            // < 5%  coverage (bristle, arrow): step every ~1% of diameter
+            // 5-15% coverage (chalk, streak):  step every ~2%
+            // > 15% coverage (soft dab, block): step every ~3%
+            if      (cov < 0.05f) newSpacing = 0.01f;
+            else if (cov < 0.15f) newSpacing = 0.02f;
+            else                  newSpacing = 0.03f;
+        }
+        m_settings.spacing = newSpacing;
+        if (m_activePreset >= 0 && m_activePreset < m_presets.size())
+            m_presets[m_activePreset].settings.spacing = newSpacing;
+    }
+    else
+    {
+        // BMP removed — restore normal spacing
+        m_settings.spacing = 0.08f;
+        if (m_activePreset >= 0 && m_activePreset < m_presets.size())
+            m_presets[m_activePreset].settings.spacing = 0.08f;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -204,21 +240,37 @@ void BrushEngine::beginStroke()
     if (m_tip)
         m_tip->beginStroke();
 
-    // Open the painter once for the whole stroke.
-    // m_layer must be set via setActiveLayer() before beginStroke().
-    if (m_layer)
+    if (!m_layer) return;
+
+    // Dry-media tips (Pixel, Eraser, Chalk, Texture) draw onto a transparent
+    // scratch image so overlapping dabs within one stroke never accumulate
+    // opacity (the classic "tube / halo" artefact).  On endStroke the scratch
+    // is composited onto the real layer exactly once.
+    m_useScratch = isDryTip();
+
+    if (m_useScratch)
+    {
+        m_strokeScratch = QImage(m_layer->size(),
+                                 QImage::Format_ARGB32_Premultiplied);
+        m_strokeScratch.fill(Qt::transparent);
+        delete m_painter;
+        m_painter = new QPainter(&m_strokeScratch);
+    }
+    else
     {
         delete m_painter;
         m_painter = new QPainter(m_layer);
-        m_painter->setRenderHint(QPainter::Antialiasing, false);
     }
+    m_painter->setRenderHint(QPainter::Antialiasing, false);
 }
 
 QRect BrushEngine::addSample(const StrokeSample &s)
 {
     if (!m_inStroke || !m_layer) return {};
 
-    // ── 1. Smooth position ────────────────────────────────────────────────
+    // ── 1. Input smoothing (EMA stabiliser) ──────────────────────────────
+    // smoothing=0.0 → raw input (no lag)
+    // smoothing=0.9 → heavy SAI-style stabilisation
     QPointF smoothed;
     if (m_crCount == 0)
     {
@@ -228,55 +280,44 @@ QRect BrushEngine::addSample(const StrokeSample &s)
     }
     else
     {
-        smoothed = m_settings.smoothing * s.pos
-                 + (1.0f - m_settings.smoothing) * m_lastSmoothed;
+        const float lag = m_settings.smoothing;
+        smoothed = (1.0f - lag) * s.pos + lag * m_lastSmoothed;
     }
 
-    m_crBuf[m_crCount % kCRBuf] = smoothed;
-    ++m_crCount;
+    const QPointF prev = m_lastSmoothed;
+    m_crCount++;
     m_lastRaw      = s.pos;
     m_lastSmoothed = smoothed;
 
-    // ── Single-click / first-sample fix ───────────────────────────────────
-    // Always stamp on the very first sample so a tap with no drag draws.
-    if (m_crCount < 2)
+    // ── 2. First sample: stamp a dot and return ───────────────────────────
+    if (m_crCount == 1)
         return stampDab(smoothed, s.pressure);
 
-    // ── 2. Walk the segment ───────────────────────────────────────────────
-    const QPointF segEnd   = smoothed;
-    const QPointF segStart = m_crBuf[(m_crCount - 2) % kCRBuf];
-    const QPointF delta    = segEnd - segStart;
-    const float   segLen   = std::sqrt(static_cast<float>(
-                                 delta.x() * delta.x() + delta.y() * delta.y()));
+    // ── 3. Walk the segment prev → smoothed, placing dabs at fixed spacing
+    // Linear interpolation between consecutive smoothed points is sufficient.
+    // With a tablet generating 60-200 Hz, points are already close together;
+    // the EMA smoothing above shapes the curve correctly without any spline.
+    // Catmull-Rom is omitted: at high input rates it overshoots and produces
+    // the visible lateral oscillations (parallel wavy lines artefact).
+    const QPointF delta  = smoothed - prev;
+    const float   segLen = std::sqrt(static_cast<float>(
+                               delta.x()*delta.x() + delta.y()*delta.y()));
     if (segLen < 0.01f) return {};
 
     const float diameter = m_settings.effectiveDiameter();
     const float spacing  = std::max(diameter * m_settings.spacing, 1.0f);
 
-    QRect dirty;
-    float walked = 0.0f;
+    QRect  dirty;
+    float  walked = 0.0f;
 
     while (m_distAccum + (segLen - walked) >= spacing)
     {
-        const float stepToNext = spacing - m_distAccum;
-        walked     += stepToNext;
-        m_distAccum = 0.0f;
+        const float step = spacing - m_distAccum;
+        walked      += step;
+        m_distAccum  = 0.0f;
 
-        const float t = walked / segLen;
-
-        QPointF dabPos;
-        if (m_crCount >= 4)
-        {
-            const QPointF &p0 = m_crBuf[(m_crCount - 4) % kCRBuf];
-            const QPointF &p1 = segStart;
-            const QPointF &p2 = segEnd;
-            const QPointF &p3 = m_crBuf[(m_crCount - 1) % kCRBuf];
-            dabPos = catmullRom(p0, p1, p2, p3, std::clamp(t, 0.0f, 1.0f));
-        }
-        else
-        {
-            dabPos = segStart + t * delta;
-        }
+        const float   t      = walked / segLen;
+        const QPointF dabPos = prev + t * delta;
 
         const QRect r = stampDab(dabPos, s.pressure);
         dirty = dirty.isEmpty() ? r : dirty.united(r);
@@ -289,17 +330,40 @@ QRect BrushEngine::addSample(const StrokeSample &s)
 
 QRect BrushEngine::endStroke()
 {
-    QRect r;
-    if (m_inStroke && m_layer && m_crCount >= 1)
-        r = stampDab(m_lastSmoothed, m_lastPressure);
+    QRect dirty;
 
+    // Stamp the final tip position to avoid a missing dot at stroke end.
+    if (m_inStroke && m_layer && m_crCount >= 1)
+    {
+        const QRect r = stampDab(m_lastSmoothed, m_lastPressure);
+        dirty = dirty.isEmpty() ? r : dirty.united(r);
+    }
+
+    // Close scratch painter before compositing.
     delete m_painter;
     m_painter = nullptr;
+
+    // Composite scratch → real layer (dry media only, once per stroke).
+    if (m_useScratch && m_layer && !m_strokeScratch.isNull())
+    {
+        QPainter lp(m_layer);
+        if (m_settings.blendMode == BrushBlendMode::Erase ||
+            m_settings.tipType  == TipType::Eraser ||
+            m_settings.tipType  == TipType::SelEraser)
+            lp.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+        else
+            lp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+        // Brush opacity applied once here; dabs were stamped at full alpha.
+        lp.setOpacity(static_cast<double>(m_settings.opacity));
+        lp.drawImage(0, 0, m_strokeScratch);
+        m_strokeScratch = QImage();
+    }
+    m_useScratch = false;
 
     m_inStroke  = false;
     m_crCount   = 0;
     m_distAccum = 0.0f;
-    return r;
+    return dirty;
 }
 
 QRect BrushEngine::renderStroke(const Stroke &stroke)
@@ -331,7 +395,9 @@ void BrushEngine::resumeStrokePainter()
     if (!m_painter) m_painter = new QPainter;
     if (!m_painter->isActive())
     {
-        m_painter->begin(m_layer);
+        // Resume onto scratch (dry) or layer (wet) as appropriate.
+        m_painter->begin(m_useScratch ? static_cast<QPaintDevice*>(&m_strokeScratch)
+                                      : static_cast<QPaintDevice*>(m_layer));
         m_painter->setRenderHint(QPainter::Antialiasing, false);
     }
 }
@@ -346,17 +412,27 @@ QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
     DabParams dab;
     dab.center          = pos;
     dab.diameter        = m_settings.sizeAtPressure(pressure);
-    dab.opacity         = m_settings.opacityAtPressure(pressure);
-    dab.hardness        = m_settings.hardness;
+    // When drawing onto scratch: stamp at full opacity so dabs never
+    // accumulate past 1.0 within a stroke. The user's opacity setting is
+    // applied once as a global alpha when scratch is merged onto the layer.
+    // For wet media (direct to layer): use the real pressure-mapped opacity.
+    dab.opacity         = m_useScratch ? 1.0f : m_settings.opacityAtPressure(pressure);
+    // Hardness: light touch → soft edges, hard press → full crispness
+    dab.hardness        = m_settings.hardness * (0.3f + 0.7f * pressure);
     dab.pressure        = pressure;
     dab.color           = m_color;
-    dab.blending        = m_settings.blending;
-    dab.dilution        = m_settings.dilution;
-    dab.persistence     = m_settings.persistence;
+    // Blending: light touch picks up more canvas colour (wet feel); hard press = pure pigment
+    dab.blending        = m_settings.blending    * (1.0f - pressure);
+    // Dilution: light touch = more watery; hard press = opaque
+    dab.dilution        = m_settings.dilution    * (1.0f - pressure);
+    // Persistence: hard press holds the picked-up colour longer
+    dab.persistence     = m_settings.persistence * (0.3f + 0.7f * pressure);
     dab.blurPressure    = m_settings.blurPressure;
-    dab.coloring        = m_settings.coloring;
+    // Coloring (Smudge): more colour injection at higher pressure
+    dab.coloring        = m_settings.coloring    * pressure;
     dab.uncolorPressure = m_settings.uncolorPressure;
-    dab.blurWidth       = m_settings.blurWidth;
+    // Blur width: harder press spreads blur wider
+    dab.blurWidth       = m_settings.blurWidth   * (0.2f + 0.8f * pressure);
     dab.keepOpacity     = m_settings.keepOpacity;
 
     QPainter::CompositionMode compMode = m_compMode;
@@ -376,7 +452,15 @@ QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
         break;
     }
 
-    m_painter->setCompositionMode(compMode);
+    // For scratch-layer dabs: use SourceOver so overlapping dabs fill in naturally.
+    // BMP shape marks are binary (alpha 0 or 1) so SourceOver doesn't accumulate
+    // past 1.0 — successive dabs simply reveal more of the shape in new positions.
+    // The soft-circle clip creates mild edge gradients, but with tight spacing these
+    // are invisible. DestinationOut is preserved for eraser tips.
+    if (m_useScratch && compMode != QPainter::CompositionMode_DestinationOut)
+        m_painter->setCompositionMode(QPainter::CompositionMode_SourceOver);
+    else
+        m_painter->setCompositionMode(compMode);
     m_tip->stamp(*m_painter, dab);
 
     const int pad = static_cast<int>(std::ceil(dab.diameter * 0.5f)) + 2;
@@ -385,32 +469,4 @@ QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
                  2 * pad, 2 * pad);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Catmull-Rom
-// ─────────────────────────────────────────────────────────────────────────────
-QPointF BrushEngine::catmullRom(const QPointF &p0, const QPointF &p1,
-                                 const QPointF &p2, const QPointF &p3, float t)
-{
-    auto dist = [](const QPointF &a, const QPointF &b) -> float {
-        const float dx = b.x() - a.x(), dy = b.y() - a.y();
-        return std::pow(dx * dx + dy * dy, 0.25f);
-    };
 
-    const float t0 = 0.0f;
-    const float t1 = t0 + dist(p0, p1);
-    const float t2 = t1 + dist(p1, p2);
-    const float t3 = t2 + dist(p2, p3);
-    const float tc = t1 + t * (t2 - t1);
-
-    auto interp = [](QPointF a, QPointF b, float ta, float tb, float tx) -> QPointF {
-        if (std::abs(tb - ta) < 1e-4f) return a;
-        return a + (b - a) * ((tx - ta) / (tb - ta));
-    };
-
-    const QPointF A1 = interp(p0, p1, t0, t1, tc);
-    const QPointF A2 = interp(p1, p2, t1, t2, tc);
-    const QPointF A3 = interp(p2, p3, t2, t3, tc);
-    const QPointF B1 = interp(A1, A2, t0, t2, tc);
-    const QPointF B2 = interp(A2, A3, t1, t3, tc);
-    return interp(B1, B2, t1, t2, tc);
-}

@@ -94,8 +94,50 @@ void PixelTip::stamp(QPainter &p, const DabParams &dab)
     const int   d   = static_cast<int>(std::ceil(dab.diameter)) + 2;
     const int baseA = static_cast<int>(dab.opacity * 255.0f);
 
-    // Cache the mask — only rebuild when size / hardness / colour changes.
-    // All painting is on the main thread so a static cache is safe.
+    if (dab.brushShape == 1 || dab.brushShape == 2)
+    {
+        // Diamond or Square — build mask directly without circle clip
+        QImage mask(d, d, QImage::Format_ARGB32_Premultiplied);
+        mask.fill(Qt::transparent);
+
+        const float cx = d * 0.5f;
+        const float cy = d * 0.5f;
+        const float hardCore = r * dab.hardness;
+        const float softEdge = std::max(r - hardCore, 0.001f);
+
+        for (int y = 0; y < d; ++y)
+        {
+            QRgb *row = reinterpret_cast<QRgb *>(mask.scanLine(y));
+            for (int x = 0; x < d; ++x)
+            {
+                const float dx = std::abs(x - cx);
+                const float dy = std::abs(y - cy);
+
+                float dist;
+                if (dab.brushShape == 1)
+                    dist = dx + dy;           // L1 norm → diamond
+                else
+                    dist = std::max(dx, dy);  // L∞ norm → square
+
+                if (dist >= r) continue;
+
+                float alpha = 1.0f;
+                if (dist > hardCore)
+                {
+                    const float t = (dist - hardCore) / softEdge;
+                    alpha = 0.5f * (1.0f + std::cos(t * 3.14159265f));
+                }
+
+                const int a = static_cast<int>(alpha * baseA);
+                row[x] = qPremultiply(qRgba(dab.color.red(), dab.color.green(),
+                                            dab.color.blue(), a));
+            }
+        }
+        p.drawImage(dab.center - QPointF(d * 0.5, d * 0.5), mask);
+        return;
+    }
+
+    // Circle (default) — use cached soft-circle mask
     static QImage cachedMask;
     static int    lastD    = -1;
     static float  lastH    = -1.f;
@@ -564,15 +606,32 @@ void TextureTip::setTexture(const QString &path)
     m_texture = loadGrayscaleMask(path, 128);
 }
 
-QImage TextureTip::loadGrayscaleMask(const QString &path, int targetSize)
+QImage TextureTip::loadGrayscaleMask(const QString &path, int /*targetSize*/)
 {
     QImage src(path);
     if (src.isNull()) return {};
-    src = src.scaled(targetSize, targetSize,
-                     Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+
+    // Pre-binarize at native resolution: strip blue boundary-circle pixels
+    // (B >> R,G) and collapse near-white fringe noise to pure white.
+    // Stored at native size so stamp() scales exactly once — a second
+    // bilinear scale would re-introduce ghost pixels that were clipped here.
+    src = src.convertToFormat(QImage::Format_RGB32);
+    for (int y = 0; y < src.height(); ++y)
+    {
+        QRgb *row = reinterpret_cast<QRgb *>(src.scanLine(y));
+        for (int x = 0; x < src.width(); ++x)
+        {
+            const int r   = qRed(row[x]);
+            const int g   = qGreen(row[x]);
+            const int b_  = qBlue(row[x]);
+            const int lum = (r + g + b_) / 3;
+            if (b_ - r > 40 && b_ - g > 40)  row[x] = qRgb(255,255,255);
+            else if (lum <= 127)               row[x] = qRgb(0,0,0);
+            else                               row[x] = qRgb(255,255,255);
+        }
+    }
     return src.convertToFormat(QImage::Format_Grayscale8);
 }
-
 void TextureTip::stamp(QPainter &p, const DabParams &dab)
 {
     if (dab.diameter < 0.5f) return;
@@ -585,44 +644,85 @@ void TextureTip::stamp(QPainter &p, const DabParams &dab)
     QImage mask(d, d, QImage::Format_ARGB32_Premultiplied);
     mask.fill(Qt::transparent);
 
-    QImage shape;
+    // Scale shape BMP from native size to dab size — single scaling operation.
+    // After bilinear scale, clip near-white ghost pixels (gray > 200 → 255)
+    // that would otherwise accumulate into a halo with SourceOver.
+    // Gray 1-200 = real ink or legitimate edge AA — kept intact.
+    QImage shapeDab;
     if (!m_shape.isNull())
-        shape = m_shape.scaled(d, d, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    {
+        shapeDab = m_shape.scaled(d, d, Qt::IgnoreAspectRatio,
+                                  Qt::SmoothTransformation);
+        // shapeDab is still RGB32 after scaled(); convert then clip
+        shapeDab = shapeDab.convertToFormat(QImage::Format_Grayscale8);
+        for (int sy = 0; sy < shapeDab.height(); ++sy)
+        {
+            uchar *srow = shapeDab.scanLine(sy);
+            for (int sx = 0; sx < shapeDab.width(); ++sx)
+                if (srow[sx] > 200) srow[sx] = 255;
+        }
+    }
 
     const int    baseA    = static_cast<int>(dab.opacity * 255.0f);
     const QColor &c       = dab.color;
     const float  hardCore = r * dab.hardness;
     const float  softEdge = std::max(r - hardCore, 0.001f);
 
+    // Canvas-space origin for world-space texture tiling
+    const int originX = static_cast<int>(std::round(dab.center.x())) - static_cast<int>(cx);
+    const int originY = static_cast<int>(std::round(dab.center.y())) - static_cast<int>(cy);
+    const int texW = m_texture.isNull() ? 0 : m_texture.width();
+    const int texH = m_texture.isNull() ? 0 : m_texture.height();
+
     for (int y = 0; y < d; ++y)
     {
         QRgb *row = reinterpret_cast<QRgb *>(mask.scanLine(y));
         for (int x = 0; x < d; ++x)
         {
-            float shapeAlpha;
-            if (!shape.isNull())
+            // ── Soft-circle clip ─────────────────────────────────────────────
+            const float dx2  = x - cx;
+            const float dy2  = y - cy;
+            const float dist = std::sqrt(dx2 * dx2 + dy2 * dy2);
+            if (dist >= r) { row[x] = 0; continue; }
+
+            float circleAlpha;
+            if (dist > hardCore)
             {
-                shapeAlpha = reinterpret_cast<const uchar *>(shape.constScanLine(y))[x] / 255.0f;
+                const float t = (dist - hardCore) / softEdge;
+                circleAlpha = 0.5f * (1.0f + std::cos(t * 3.14159265f));
             }
             else
             {
-                const float dx2  = x - cx, dy2 = y - cy;
-                const float dist = std::sqrt(dx2 * dx2 + dy2 * dy2);
-                if (dist >= r) { row[x] = 0; continue; }
-                shapeAlpha = (dist > hardCore)
-                    ? 0.5f * (1.0f + std::cos((dist - hardCore) / softEdge * 3.14159265f))
-                    : 1.0f;
+                circleAlpha = 1.0f;
             }
 
-            float texAlpha = 1.0f;
-            if (!m_texture.isNull())
+            // ── Shape BMP: dab-local, scaled to brush size ───────────────────
+            // Replaces the plain circle with a textured silhouette.
+            // Dark pixels in the BMP = ink; white = transparent.
+            float shapeAlpha = 1.0f;
+            if (!shapeDab.isNull())
             {
-                const int tx = x * m_texture.width()  / d;
-                const int ty = y * m_texture.height() / d;
-                texAlpha = reinterpret_cast<const uchar *>(m_texture.constScanLine(ty))[tx] / 255.0f;
+                const uchar raw = reinterpret_cast<const uchar *>(
+                    shapeDab.constScanLine(y))[x];
+                shapeAlpha = (255 - raw) / 255.0f;
             }
 
-            const int a = std::clamp(static_cast<int>(shapeAlpha * texAlpha * baseA), 0, 255);
+            // ── Texture BMP: world-space tiled overlay ───────────────────────
+            // Tiled across the canvas so the paper/grain stays fixed while
+            // the brush reveals it. Applied as a multiplier over the shape.
+            float texAlpha = 1.0f;
+            if (texW > 0 && texH > 0)
+            {
+                const int tx = ((originX + x) % texW + texW) % texW;
+                const int ty = ((originY + y) % texH + texH) % texH;
+                const uchar raw = reinterpret_cast<const uchar *>(
+                    m_texture.constScanLine(ty))[tx];
+                texAlpha = (255 - raw) / 255.0f;
+            }
+
+            const int a = std::clamp(
+                static_cast<int>(circleAlpha * shapeAlpha * texAlpha * baseA),
+                0, 255);
             row[x] = qPremultiply(qRgba(c.red(), c.green(), c.blue(), a));
         }
     }
