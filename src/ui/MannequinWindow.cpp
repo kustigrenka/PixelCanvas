@@ -154,7 +154,7 @@ void MannequinWindow::buildUI(const QString &url)
     m_webView = new QWebEngineView(this);
 
     // Persistent profile — stays logged in between sessions
-    auto *profile = new QWebEngineProfile("pinterest_profile", m_webView);
+    auto *profile = new QWebEngineProfile("posemyart_profile", m_webView);
     profile->setPersistentCookiesPolicy(QWebEngineProfile::AllowPersistentCookies);
     profile->setHttpUserAgent(
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
