@@ -1,20 +1,19 @@
 cmake_minimum_required(VERSION 3.25)
 project(PixelCanvas)
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets)
+find_package(Qt6 OPTIONAL_COMPONENTS WebEngineWidgets)
 find_package(OpenCV REQUIRED)
 find_package(X11)
 find_package(ZLIB REQUIRED)
 
 add_executable(PixelCanvas
-    # ── Entry point ──────────────────────────────────────────────────────────
+# ── Entry point ───────────────────────────────────────────────────────────
     src/main.cpp
-
-    # ── Core (Toma) ──────────────────────────────────────────────────────────
+# ── Core ──────────────────────────────────────────────────────────────────
     src/canvas/CanvasWidget.cpp
     src/brush/BrushEngine.cpp
     src/brush/BrushTip.cpp
@@ -22,8 +21,7 @@ add_executable(PixelCanvas
     src/layers/UndoStack.cpp
     src/filters/FilterImpls.cpp
     src/io/ProjectIO.cpp
-
-    # ── UI (Member 4) ────────────────────────────────────────────────────────
+# ── UI ────────────────────────────────────────────────────────────────────
     src/ui/MainWindow.cpp
     src/ui/MainWindowDocks.cpp
     src/ui/MainWindowFilters.cpp
@@ -35,9 +33,12 @@ add_executable(PixelCanvas
     src/ui/ColorSwatchWidget.cpp
     src/ui/ColorPanelWidget.cpp
     src/ui/ScratchPadWidget.cpp
+    src/ui/PinterestWindow.h
+    src/ui/PinterestWindow.cpp
+    src/ui/MannequinWindow.h
+    src/ui/MannequinWindow.cpp
 )
 
-# ── Include dirs: lets all files use flat #include "X.h" with no path changes ──
 target_include_directories(PixelCanvas PRIVATE
     src
     src/canvas
@@ -57,3 +58,14 @@ target_link_libraries(PixelCanvas PRIVATE
     $<$<BOOL:${X11_Xi_FOUND}>:X11::Xi>
     ZLIB::ZLIB
 )
+
+if(Qt6WebEngineWidgets_FOUND)
+    target_compile_definitions(PixelCanvas PRIVATE QT_WEBENGINEWIDGETS_LIB)
+    target_link_libraries(PixelCanvas PRIVATE Qt6::WebEngineWidgets)
+    # Tell Qt where to find QtWebEngineProcess at runtime
+    target_compile_definitions(PixelCanvas PRIVATE
+        QTWEBENGINEPROCESS_PATH="/usr/lib/qt6/libexec/QtWebEngineProcess")
+    message(STATUS "Qt WebEngine found — Pinterest embedded browser enabled")
+else()
+    message(STATUS "Qt WebEngine NOT found — using system browser fallback")
+endif()

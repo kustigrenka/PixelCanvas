@@ -36,7 +36,8 @@
 #include "Layer.h"
 #include "AppStyleSheet.h"
 #include "ColorPanelWidget.h"
-
+#include "PinterestWindow.h"
+#include "MannequinWindow.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -139,6 +140,37 @@ void MainWindow::buildMenuBar()
     filter->addAction(tr("&Brightness/Contrast…"), this, &MainWindow::onFilterBrightnessContrast);
     filter->addAction(tr("&Invert"),               this, &MainWindow::onFilterInvert);
     filter->addAction(tr("&Sharpen…"),             this, &MainWindow::onFilterSharpen);
+
+    // ── References ────────────────────────────────────────────────────────────
+    auto *references = menuBar()->addMenu(tr("&References"));
+
+    references->addAction(tr("⬡  Open Pinterest…"), this, [this]() {
+        if (!m_pinterestWin)
+            m_pinterestWin = new PinterestWindow(this);
+        m_pinterestWin->show();
+        m_pinterestWin->raise();
+        m_pinterestWin->activateWindow();
+    });
+
+    references->addAction(tr("◈  Open Pose Reference (PoseMy.Art)…"), this, [this]() {
+        if (!m_mannequinWin)
+            m_mannequinWin = new MannequinWindow(this, "https://posemy.art/");
+        m_mannequinWin->show();
+        m_mannequinWin->raise();
+        m_mannequinWin->activateWindow();
+    });
+
+    references->addSeparator();
+
+    references->addAction(tr("Close Pinterest"), this, [this]() {
+        if (m_pinterestWin && m_pinterestWin->isVisible())
+            m_pinterestWin->hide();
+    });
+
+    references->addAction(tr("Close Mannequins"), this, [this]() {
+        if (m_mannequinWin && m_mannequinWin->isVisible())
+            m_mannequinWin->hide();
+    });
 
     // ── Window (dock toggles added later in buildDocks) ────────────────────
     menuBar()->addMenu(tr("&Window"));
