@@ -40,8 +40,6 @@ MannequinWindow::MannequinWindow(QWidget *parent, const QString &url)
 #ifdef QT_WEBENGINEWIDGETS_LIB
     // Must be set before QApplication is created — but since we're late,
     // set it now; Qt will use it for any new engine processes
-    qputenv("QTWEBENGINEPROCESS_PATH", "/usr/lib/qt6/libexec/QtWebEngineProcess");
-    qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--enable-gpu --use-gl=desktop --enable-webgl");
 #endif
 
     buildUI(url);
