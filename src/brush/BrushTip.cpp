@@ -90,12 +90,25 @@ void PixelTip::stamp(QPainter &p, const DabParams &dab)
 {
     if (dab.diameter < 0.5f) return;
 
-    const float r  = dab.diameter * 0.5f;
-    const int   d  = static_cast<int>(std::ceil(dab.diameter)) + 2;
+    const float r   = dab.diameter * 0.5f;
+    const int   d   = static_cast<int>(std::ceil(dab.diameter)) + 2;
     const int baseA = static_cast<int>(dab.opacity * 255.0f);
 
-    const QImage mask = makeSoftCircleMask(d, r, dab.hardness, dab.color, baseA);
-    p.drawImage(dab.center - QPointF(d * 0.5, d * 0.5), mask);
+    // Cache the mask — only rebuild when size / hardness / colour changes.
+    // All painting is on the main thread so a static cache is safe.
+    static QImage cachedMask;
+    static int    lastD    = -1;
+    static float  lastH    = -1.f;
+    static QColor lastC;
+    static int    lastA    = -1;
+
+    if (d != lastD || dab.hardness != lastH || dab.color != lastC || baseA != lastA)
+    {
+        cachedMask = makeSoftCircleMask(d, r, dab.hardness, dab.color, baseA);
+        lastD = d; lastH = dab.hardness; lastC = dab.color; lastA = baseA;
+    }
+
+    p.drawImage(dab.center - QPointF(d * 0.5, d * 0.5), cachedMask);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,7 +155,11 @@ void BrushTipWet::stamp(QPainter &p, const DabParams &dab)
     const int cy = static_cast<int>(dab.center.y());
     QColor canvasSample = Qt::transparent;
     if (canvas && cx >= 0 && cy >= 0 && cx < canvas->width() && cy < canvas->height())
-        canvasSample = canvas->pixelColor(cx, cy);
+    {
+        // Fast direct scanline read — avoids format-conversion overhead of pixelColor()
+        const QRgb px = reinterpret_cast<const QRgb *>(canvas->constScanLine(cy))[cx];
+        canvasSample = QColor(qUnpremultiply(px));
+    }
 
     // ── 2. Update stored sample (persistence) ─────────────────────────────
     if (!m_hasSample)
@@ -255,7 +272,10 @@ void WaterColorTip::stamp(QPainter &p, const DabParams &dab)
     const int cy = static_cast<int>(dab.center.y());
     QColor canvasSample = Qt::transparent;
     if (canvas && cx >= 0 && cy >= 0 && cx < canvas->width() && cy < canvas->height())
-        canvasSample = canvas->pixelColor(cx, cy);
+    {
+        const QRgb px = reinterpret_cast<const QRgb *>(canvas->constScanLine(cy))[cx];
+        canvasSample = QColor(qUnpremultiply(px));
+    }
 
     if (!m_hasSample)
     {
@@ -310,7 +330,10 @@ void MarkerTip::stamp(QPainter &p, const DabParams &dab)
     const int cy = static_cast<int>(dab.center.y());
     QColor canvasSample = Qt::transparent;
     if (canvas && cx >= 0 && cy >= 0 && cx < canvas->width() && cy < canvas->height())
-        canvasSample = canvas->pixelColor(cx, cy);
+    {
+        const QRgb px = reinterpret_cast<const QRgb *>(canvas->constScanLine(cy))[cx];
+        canvasSample = QColor(qUnpremultiply(px));
+    }
 
     if (!m_hasSample)
     {
@@ -516,6 +539,91 @@ void ChalkTip::stamp(QPainter &p, const DabParams &dab)
 
             const int a = static_cast<int>(alpha * baseA);
             row[x] = qPremultiply(qRgba(dab.color.red(), dab.color.green(), dab.color.blue(), a));
+        }
+    }
+
+    p.drawImage(dab.center - QPointF(cx, cy), mask);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TextureTip
+// ─────────────────────────────────────────────────────────────────────────────
+TextureTip::TextureTip(const QString &texturePath, const QString &shapePath)
+{
+    if (!shapePath.isEmpty())   setShape(shapePath);
+    if (!texturePath.isEmpty()) setTexture(texturePath);
+}
+
+void TextureTip::setShape(const QString &path)
+{
+    m_shape = loadGrayscaleMask(path, 128);
+}
+
+void TextureTip::setTexture(const QString &path)
+{
+    m_texture = loadGrayscaleMask(path, 128);
+}
+
+QImage TextureTip::loadGrayscaleMask(const QString &path, int targetSize)
+{
+    QImage src(path);
+    if (src.isNull()) return {};
+    src = src.scaled(targetSize, targetSize,
+                     Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    return src.convertToFormat(QImage::Format_Grayscale8);
+}
+
+void TextureTip::stamp(QPainter &p, const DabParams &dab)
+{
+    if (dab.diameter < 0.5f) return;
+
+    const int   d  = static_cast<int>(std::ceil(dab.diameter)) + 2;
+    const float r  = dab.diameter * 0.5f;
+    const float cx = d * 0.5f;
+    const float cy = d * 0.5f;
+
+    QImage mask(d, d, QImage::Format_ARGB32_Premultiplied);
+    mask.fill(Qt::transparent);
+
+    QImage shape;
+    if (!m_shape.isNull())
+        shape = m_shape.scaled(d, d, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+
+    const int    baseA    = static_cast<int>(dab.opacity * 255.0f);
+    const QColor &c       = dab.color;
+    const float  hardCore = r * dab.hardness;
+    const float  softEdge = std::max(r - hardCore, 0.001f);
+
+    for (int y = 0; y < d; ++y)
+    {
+        QRgb *row = reinterpret_cast<QRgb *>(mask.scanLine(y));
+        for (int x = 0; x < d; ++x)
+        {
+            float shapeAlpha;
+            if (!shape.isNull())
+            {
+                shapeAlpha = reinterpret_cast<const uchar *>(shape.constScanLine(y))[x] / 255.0f;
+            }
+            else
+            {
+                const float dx2  = x - cx, dy2 = y - cy;
+                const float dist = std::sqrt(dx2 * dx2 + dy2 * dy2);
+                if (dist >= r) { row[x] = 0; continue; }
+                shapeAlpha = (dist > hardCore)
+                    ? 0.5f * (1.0f + std::cos((dist - hardCore) / softEdge * 3.14159265f))
+                    : 1.0f;
+            }
+
+            float texAlpha = 1.0f;
+            if (!m_texture.isNull())
+            {
+                const int tx = x * m_texture.width()  / d;
+                const int ty = y * m_texture.height() / d;
+                texAlpha = reinterpret_cast<const uchar *>(m_texture.constScanLine(ty))[tx] / 255.0f;
+            }
+
+            const int a = std::clamp(static_cast<int>(shapeAlpha * texAlpha * baseA), 0, 255);
+            row[x] = qPremultiply(qRgba(c.red(), c.green(), c.blue(), a));
         }
     }
 

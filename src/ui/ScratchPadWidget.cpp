@@ -213,7 +213,11 @@ void ScratchPadWidget::tabletEvent(QTabletEvent *e)
 void ScratchPadWidget::mousePressEvent(QMouseEvent *e)
 {
     if (m_tabletInUse) return;
-    if (e->button() == Qt::RightButton) { clear(); return; }
+    if (e->button() == Qt::RightButton) {
+        pickColor(e->position());   // was: clear()
+        return;
+    }
+    if (e->button() == Qt::MiddleButton) { clear(); return; }
     if (e->button() == Qt::LeftButton) {
         m_altHeld   = (e->modifiers() & Qt::AltModifier);
         m_cursorPos = e->position();

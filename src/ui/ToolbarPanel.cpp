@@ -3,6 +3,7 @@
 #include "BrushEngine.h"
 #include "BrushTip.h"
 
+#include <QSettings>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -22,6 +23,11 @@
 #include <QPixmap>
 #include <QMenu>
 #include <QInputDialog>
+#include <QStandardPaths>
+#include <QDir>
+#include <QFileInfo>
+#include <QFile>
+#include <QFileDialog>
 #include <cmath>
 
 // 
@@ -208,6 +214,14 @@ ToolbarPanel::ToolbarPanel(BrushEngine *brushEngine, QObject *parent)
 {
     m_slots.resize(kTotalSlots);
     fillBuiltinSlots(m_slots);
+
+    // Restore last used color
+    QSettings settings("PixelCanvas", "PixelCanvas");
+    const QString savedStr = settings.value("lastColor", "#ff000000").toString();
+    const QColor saved(savedStr);
+    qDebug() << "RESTORE attempt:" << savedStr << "valid:" << saved.isValid();
+    if (saved.isValid())
+        m_primary = saved;
 }
 
 void ToolbarPanel::ensureBuilt()
@@ -217,15 +231,12 @@ void ToolbarPanel::ensureBuilt()
     buildColorSection();
     buildSwatchRow();
     buildBrushBody();
-    if (m_colorWheel) {
-        connect(m_colorWheel, &ColorWheelWidget::colorChanged,
-                this, [this](const QColor &c) {
-            m_primary = c;
-            updateColorSquares();
-            emit colorChanged(m_primary);
-            updatePreview();   // safe now, m_previewLabel is valid
-        });
-    }
+
+    // Re-apply restored color now that all widgets exist
+    if (m_colorWheel) m_colorWheel->setColor(m_primary);
+    updateColorSquares();
+    if (m_brushEngine) m_brushEngine->setColor(m_primary);
+    emit colorChanged(m_primary);
 }
 
 // 
@@ -248,7 +259,7 @@ void ToolbarPanel::buildColorSection()
     m_colorWheel = new ColorWheelWidget(nullptr);
     m_colorWheel->setColor(m_primary);
     connect(m_colorWheel, &ColorWheelWidget::colorChanged, this, [this](const QColor &c) {
-        m_primary = c; updateColorSquares(); emit colorChanged(m_primary); updatePreview();
+        m_primary = c; updateColorSquares(); emit colorChanged(m_primary); updatePreview(); saveLastColor();
     });
 }
 
@@ -357,25 +368,102 @@ void ToolbarPanel::buildBrushBody()
     // Store combo pointer for loadSlotIntoUI
     m_shapeRow->setProperty("shapeCombo", QVariant::fromValue(static_cast<QObject*>(shapeCombo)));
 
-    //  4. Texture row (dropdown — extensible) 
+    //  4. Texture import row 
     m_textureRow = new QWidget(m_brushBody);
     auto *texLayout = new QHBoxLayout(m_textureRow);
     texLayout->setContentsMargins(0,0,0,0); texLayout->setSpacing(4);
+
     auto *texLbl = new QLabel(tr("Texture"), m_textureRow);
     texLbl->setStyleSheet("color:#ccc; font-size:11px;");
     texLbl->setFixedWidth(80);
     texLayout->addWidget(texLbl);
 
-    auto *texCombo = new QComboBox(m_textureRow);
-    texCombo->addItem(tr("None"));
-    // Future texture PNGs from resources/brush_tips/ will be added here
-    texCombo->setStyleSheet(
+    const QString comboStyle =
         "QComboBox{background:#2d2d2d;border:1px solid #555;color:#ccc;"
         "border-radius:2px;padding:1px 4px;font-size:11px;}"
         "QComboBox::drop-down{border:none;}"
-        "QComboBox QAbstractItemView{background:#2d2d2d;color:#ccc;selection-background-color:#4a6fa5;}");
+        "QComboBox QAbstractItemView{background:#2d2d2d;color:#ccc;"
+        "selection-background-color:#4a6fa5;}";
+
+    auto *texCombo = new QComboBox(m_textureRow);
+    texCombo->addItem(tr("None"));
+    texCombo->setStyleSheet(comboStyle);
+
+    const QString texDir = QStandardPaths::writableLocation(
+        QStandardPaths::AppLocalDataLocation) + "/brush_textures/";
+    QDir(texDir).mkpath(".");
+    for (const QString &f : QDir(texDir).entryList({"*.bmp","*.png"}, QDir::Files))
+        texCombo->addItem(QFileInfo(f).baseName(), texDir + f);
+
+    connect(texCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this, texCombo](int idx) {
+        const QString path = texCombo->itemData(idx).toString();
+        if (m_brushEngine) m_brushEngine->setTipTexture(path);
+    });
     texLayout->addWidget(texCombo, 1);
+
+    auto *importTexBtn = new QToolButton(m_textureRow);
+    importTexBtn->setText("…");
+    importTexBtn->setToolTip(tr("Import texture BMP/PNG"));
+    connect(importTexBtn, &QToolButton::clicked, this, [this, texCombo] {
+        const QString src = QFileDialog::getOpenFileName(
+            nullptr, tr("Import Brush Texture"), {},
+            tr("Images (*.bmp *.png *.jpg)"));
+        if (src.isEmpty()) return;
+        const QString dest = QStandardPaths::writableLocation(
+            QStandardPaths::AppLocalDataLocation)
+            + "/brush_textures/" + QFileInfo(src).fileName();
+        QFile::copy(src, dest);
+        texCombo->addItem(QFileInfo(src).baseName(), dest);
+        texCombo->setCurrentIndex(texCombo->count() - 1);
+    });
+    texLayout->addWidget(importTexBtn);
     root->addWidget(m_textureRow);
+
+    //  4b. Shape import row 
+    auto *shapeImportRow = new QWidget(m_brushBody);
+    auto *shapeImportLayout = new QHBoxLayout(shapeImportRow);
+    shapeImportLayout->setContentsMargins(0,0,0,0); shapeImportLayout->setSpacing(4);
+
+    auto *shapeImportLbl = new QLabel(tr("Shape BMP"), shapeImportRow);
+    shapeImportLbl->setStyleSheet("color:#ccc; font-size:11px;");
+    shapeImportLbl->setFixedWidth(80);
+    shapeImportLayout->addWidget(shapeImportLbl);
+
+    auto *shapeImportCombo = new QComboBox(shapeImportRow);
+    shapeImportCombo->addItem(tr("Default (circle)"));
+    shapeImportCombo->setStyleSheet(comboStyle);
+
+    const QString shapeDir = QStandardPaths::writableLocation(
+        QStandardPaths::AppLocalDataLocation) + "/brush_shapes/";
+    QDir(shapeDir).mkpath(".");
+    for (const QString &f : QDir(shapeDir).entryList({"*.bmp","*.png"}, QDir::Files))
+        shapeImportCombo->addItem(QFileInfo(f).baseName(), shapeDir + f);
+
+    connect(shapeImportCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this, shapeImportCombo](int idx) {
+        const QString path = shapeImportCombo->itemData(idx).toString();
+        if (m_brushEngine) m_brushEngine->setTipShape(path);
+    });
+    shapeImportLayout->addWidget(shapeImportCombo, 1);
+
+    auto *importShapeBtn = new QToolButton(shapeImportRow);
+    importShapeBtn->setText("…");
+    importShapeBtn->setToolTip(tr("Import brush shape BMP/PNG"));
+    connect(importShapeBtn, &QToolButton::clicked, this, [this, shapeImportCombo] {
+        const QString src = QFileDialog::getOpenFileName(
+            nullptr, tr("Import Brush Shape"), {},
+            tr("Images (*.bmp *.png)"));
+        if (src.isEmpty()) return;
+        const QString dest = QStandardPaths::writableLocation(
+            QStandardPaths::AppLocalDataLocation)
+            + "/brush_shapes/" + QFileInfo(src).fileName();
+        QFile::copy(src, dest);
+        shapeImportCombo->addItem(QFileInfo(src).baseName(), dest);
+        shapeImportCombo->setCurrentIndex(shapeImportCombo->count() - 1);
+    });
+    shapeImportLayout->addWidget(importShapeBtn);
+    root->addWidget(shapeImportRow);
 
     root->addWidget(makeSep(m_brushBody));
 
@@ -797,10 +885,17 @@ void ToolbarPanel::updateColorSquares()
 
 void ToolbarPanel::emitSettings()
 {
-    // Also keep brushEngine in sync if available
     if (m_brushEngine)
         m_brushEngine->setSettings(m_settings);
     emit brushSettingsChanged(m_settings);
+}
+
+void ToolbarPanel::saveLastColor()
+{
+    QSettings settings("PixelCanvas", "PixelCanvas");
+    settings.setValue("lastColor", m_primary.name(QColor::HexArgb));
+    settings.sync();
+    qDebug() << "SAVED" << m_primary.name(QColor::HexArgb) << settings.fileName() << settings.status();
 }
 
 void ToolbarPanel::onPrimaryColorClicked()
@@ -812,6 +907,7 @@ void ToolbarPanel::onPrimaryColorClicked()
         updateColorSquares();
         emit colorChanged(m_primary);
         updatePreview();
+        saveLastColor();
     }
 }
 
@@ -822,6 +918,7 @@ void ToolbarPanel::onSwapColors()
     updateColorSquares();
     emit colorChanged(m_primary);
     updatePreview();
+    saveLastColor();
 }
 
 // 
@@ -900,4 +997,14 @@ void ToolbarPanel::selectTool(Tool t)
         }
     }
     emit toolChanged(t);
+}
+
+void ToolbarPanel::onExternalColorChanged(const QColor &color)
+{
+    m_primary = color;
+    if (m_colorWheel) m_colorWheel->setColor(color);
+    updateColorSquares();
+    emit colorChanged(m_primary);
+    updatePreview();
+    saveLastColor();
 }

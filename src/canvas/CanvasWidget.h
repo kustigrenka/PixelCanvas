@@ -4,6 +4,8 @@
 #include <QImage>
 #include <QPointF>
 #include <QRect>
+#include <QStack>
+#include <QTimer>
 
 #include "Stroke.h"
 
@@ -12,15 +14,6 @@ class BrushEngine;
 class UndoStack;
 class Filter;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CanvasWidget  (Toma)
-//
-// QOpenGLWidget subclass.  Owns:
-//   - composited display image (m_composited)
-//   - viewport transform (m_offset, m_zoom)
-//   - all mouse / tablet event handling
-//   - recompositeRect(dirty) for dirty-region updates
-// ─────────────────────────────────────────────────────────────────────────────
 class CanvasWidget : public QOpenGLWidget
 {
     Q_OBJECT
@@ -32,14 +25,10 @@ public:
                           QWidget     *parent = nullptr);
     ~CanvasWidget() override;
 
-    // Apply a filter to the active layer (pushes undo snapshot first)
     void applyFilter(Filter *filter);
-
-    // Re-initialise display image after a canvas size change (LayerStack already resized)
     void reinitCanvas();
 
-    // Zoom / pan / rotate / flip API
-    void setZoom(float zoom);
+    void  setZoom(float zoom);
     float zoom() const { return m_zoom; }
     void  resetView();
     void  forceRecomposite();
@@ -50,16 +39,13 @@ public:
     void  setFlipH(bool flip);
     bool  flipH() const { return m_flipH; }
 
-    // Navigator: read-only access to the composited image for thumbnail rendering
     const QImage &compositedImage() const { return m_composited; }
 
 protected:
-    // ── QOpenGLWidget lifecycle ───────────────────────────────────────────────
     void initializeGL()  override;
     void resizeGL(int w, int h) override;
     void paintGL()       override;
 
-    // ── Input events ──────────────────────────────────────────────────────────
     void tabletEvent(QTabletEvent *e)      override;
     void mousePressEvent(QMouseEvent *e)   override;
     void mouseMoveEvent(QMouseEvent *e)    override;
@@ -76,15 +62,19 @@ signals:
     void rotationChanged(float degrees);
     void flipHChanged(bool flipped);
     void canvasUpdated();
+    void colorPicked(const QColor &color);
 
 private:
     QPointF widgetToCanvas(const QPointF &wp) const;
     void recompositeRect(const QRect &dirty);
+    void flushPendingDirty();          // called by m_repaintTimer
     void pointerBegin(const QPointF &widgetPos, float pressure,
                       float tiltX, float tiltY, float rotation);
     void pointerUpdate(const QPointF &widgetPos, float pressure,
                        float tiltX, float tiltY, float rotation);
     void pointerEnd();
+
+    void doBucketFill(const QPointF &canvasPos);
 
     // ── Owned objects ─────────────────────────────────────────────────────────
     LayerStack  *m_layerStack  = nullptr;
@@ -96,24 +86,33 @@ private:
     // ── Viewport ──────────────────────────────────────────────────────────────
     QPointF m_offset;
     float   m_zoom     = 1.0f;
-    float   m_rotation = 0.0f;   // degrees, CCW positive
+    float   m_rotation = 0.0f;
     bool    m_flipH    = false;
 
     // ── Drawing state ─────────────────────────────────────────────────────────
-    bool    m_drawing         = false;
-    bool    m_tabletInUse     = false;
+    bool    m_drawing       = false;
+    bool    m_tabletInUse   = false;
+
+    // ── Batched recomposite (avoids one composite per dab during fast strokes) ─
+    QRect   m_pendingDirty;
+    QTimer *m_repaintTimer  = nullptr;   // fires every 8 ms (~120 fps cap)
 
     // ── Pan state ─────────────────────────────────────────────────────────────
-    bool    m_panning         = false;
-    bool    m_middlePanning   = false;  // true while middle mouse button is held
+    bool    m_panning       = false;
+    bool    m_middlePanning = false;
     QPointF m_panStartWidget;
     QPointF m_panStartOffset;
 
     // ── Keyboard modifiers ────────────────────────────────────────────────────
-    bool    m_spaceHeld       = false;
-    bool    m_altHeld         = false;
+    bool    m_spaceHeld     = false;
+    bool    m_altHeld       = false;
 
     // ── Brush cursor overlay ──────────────────────────────────────────────────
-    QPointF m_cursorPos;               // last known widget-space cursor position
-    bool    m_cursorOnCanvas  = false; // hide circle when cursor leaves widget
+    QPointF m_cursorPos;
+    bool    m_cursorOnCanvas = false;
+
+    // ── Gradient / selection tools ────────────────────────────────────────────
+    QPointF m_gradientStart;
+    QImage  m_selectionMask;        // Grayscale8, same size as canvas
+    bool    m_hasSelection = false;
 };

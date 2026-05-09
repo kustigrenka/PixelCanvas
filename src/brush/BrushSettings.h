@@ -26,8 +26,8 @@ struct BrushSettings
     float spacing         = 0.08f;
     float smoothing       = 0.70f;
 
-    BrushBlendMode blendMode = BrushBlendMode::Normal;
-    bool  keepOpacity     = false;
+    BrushBlendMode blendMode  = BrushBlendMode::Normal;
+    bool           keepOpacity = false;
 
     float blending        = 0.0f;
     float dilution        = 0.0f;
@@ -37,8 +37,7 @@ struct BrushSettings
     float uncolorPressure = 0.90f;
     float blurWidth       = 0.50f;
 
-    // 0 = Circle  1 = Diamond  2 = Square
-    int   brushShape      = 0;
+    int   brushShape = 0;   // 0=Circle  1=Diamond  2=Square
 
     TipType tipType = TipType::Pixel;
 
@@ -56,25 +55,9 @@ struct BrushSettings
         return minD + (effectiveDiameter() - minD) * pressure;
     }
 
-    bool isWetMedia() const
-    {
-        return tipType == TipType::Brush      ||
-               tipType == TipType::WaterColor ||
-               tipType == TipType::Marker;
-    }
-
-    bool hasBlurPressure() const
-    {
-        return tipType == TipType::WaterColor ||
-               tipType == TipType::Marker;
-    }
-
-    bool hasHardness() const
-    {
-        return tipType != TipType::Blur    &&
-               tipType != TipType::Bucket  &&
-               tipType != TipType::Gradient;
-    }
+    bool isWetMedia()    const { return tipType==TipType::Brush || tipType==TipType::WaterColor || tipType==TipType::Marker; }
+    bool hasBlurPressure() const { return tipType==TipType::WaterColor || tipType==TipType::Marker; }
+    bool hasHardness()   const { return tipType!=TipType::Blur && tipType!=TipType::Bucket && tipType!=TipType::Gradient; }
 
     static constexpr const char* kKeySize            = "size";
     static constexpr const char* kKeySizeMul         = "sizeMultiplier";
@@ -102,12 +85,14 @@ struct BrushPreset
     QString       name;
     BrushSettings settings;
 
+    // Fixed: sizeMultiplier was 0.1f — caused sub-pixel dabs, no drawing on first click
     static BrushPreset makePixelPencil()
     {
         BrushPreset p; p.name="Pencil";
-        p.settings.tipType=TipType::Pixel; p.settings.size=5.0f;
-        p.settings.sizeMultiplier=0.1f; p.settings.hardness=0.95f;
-        p.settings.spacing=0.05f; return p;
+        p.settings.tipType=TipType::Pixel;
+        p.settings.size=10.0f; p.settings.sizeMultiplier=1.0f;
+        p.settings.hardness=0.95f; p.settings.spacing=0.05f;
+        return p;
     }
     static BrushPreset makeAirbrush()
     {

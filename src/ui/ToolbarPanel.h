@@ -55,6 +55,8 @@ public:
 
     static BrushSettings defaultSettings(TipType tt);
 
+    void onExternalColorChanged(const QColor &color);
+
 signals:
     void brushSettingsChanged(const BrushSettings &settings);
     void colorChanged(const QColor &color);
@@ -100,6 +102,7 @@ private:
     void           updateDynamicSliders();
     void           updateShapeButtons();
     void           emitSettings();
+    void saveLastColor();
 
     // ── Slot defaults by tip type ─────────────────────────────────────────────
 

@@ -25,6 +25,7 @@
 #include <QApplication>
 #include <QSettings>
 
+
 #include "CanvasWidget.h"
 #include "ToolbarPanel.h"
 #include "LayerPanel.h"
@@ -34,6 +35,8 @@
 #include "UndoStack.h"
 #include "Layer.h"
 #include "AppStyleSheet.h"
+#include "ColorPanelWidget.h"
+
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -224,6 +227,12 @@ void MainWindow::connectSignals()
 
     connect(m_layerStack, &LayerStack::layerPropertiesChanged,
             m_canvas, &CanvasWidget::forceRecomposite);
+
+    connect(m_canvas, &CanvasWidget::colorPicked,
+            m_toolbar, &ToolbarPanel::onExternalColorChanged);
+
+    connect(m_colorPanel, &ColorPanelWidget::colorChanged,
+        m_toolbar, &ToolbarPanel::onExternalColorChanged);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -19,6 +19,8 @@ class QSpinBox;
 class QDockWidget;
 class QAction;
 class ColorWheelWidget;
+class ColorPanelWidget;
+
 
 class MainWindow : public QMainWindow
 {
@@ -86,6 +88,8 @@ private:
     CanvasWidget  *m_canvas       = nullptr;
     ToolbarPanel  *m_toolbar      = nullptr;
     LayerPanel    *m_layerPanel   = nullptr;
+        ColorPanelWidget  *m_colorPanel   = nullptr;
+
 
     // ── Docks ─────────────────────────────────────────────────────────────────
     QDockWidget   *m_dockNavigator = nullptr;

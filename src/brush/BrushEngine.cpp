@@ -5,12 +5,9 @@
 #include <algorithm>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Construction / destruction
-// ─────────────────────────────────────────────────────────────────────────────
 BrushEngine::BrushEngine(QObject *parent)
     : QObject(parent)
 {
-    // Seed the preset list with SAI 2-style defaults
     m_presets << BrushPreset::makePixelPencil()
               << BrushPreset::makeAirbrush()
               << BrushPreset::makeBrush()
@@ -24,6 +21,7 @@ BrushEngine::BrushEngine(QObject *parent)
 
 BrushEngine::~BrushEngine()
 {
+    delete m_painter;
     delete m_tip;
 }
 
@@ -35,7 +33,6 @@ void BrushEngine::setPresets(const QVector<BrushPreset> &presets)
     m_presets = presets;
     if (m_presets.isEmpty())
         m_presets << BrushPreset::makePixelPencil();
-
     m_activePreset = 0;
     setActivePreset(0);
     emit presetsChanged();
@@ -51,10 +48,8 @@ void BrushEngine::removePreset(int index)
 {
     if (index < 0 || index >= m_presets.size()) return;
     m_presets.removeAt(index);
-
     if (m_presets.isEmpty())
         m_presets << BrushPreset::makePixelPencil();
-
     const int newActive = std::clamp(m_activePreset, 0, (int)m_presets.size() - 1);
     setActivePreset(newActive);
     emit presetsChanged();
@@ -83,7 +78,6 @@ void BrushEngine::setSettings(const BrushSettings &s)
     const bool tipChanged = (s.tipType != m_settings.tipType);
     m_settings = s;
 
-    // Keep the active preset in sync so ToolbarPanel edits are not lost.
     if (m_activePreset >= 0 && m_activePreset < m_presets.size())
         m_presets[m_activePreset].settings = s;
 
@@ -139,6 +133,58 @@ void BrushEngine::applyTipType(const BrushSettings &s)
         m_compMode = QPainter::CompositionMode_SourceOver;
         break;
     }
+
+    // Re-apply any imported texture/shape paths to the new tip
+    if (!m_tipTexturePath.isEmpty() || !m_tipShapePath.isEmpty())
+    {
+        auto *tt = dynamic_cast<TextureTip *>(m_tip);
+        if (!tt)
+        {
+            // Upgrade to TextureTip, preserving composition mode
+            delete m_tip;
+            m_tip = tt = new TextureTip(m_tipTexturePath, m_tipShapePath);
+        }
+        else
+        {
+            if (!m_tipTexturePath.isEmpty()) tt->setTexture(m_tipTexturePath);
+            if (!m_tipShapePath.isEmpty())   tt->setShape(m_tipShapePath);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Texture / shape import
+// ─────────────────────────────────────────────────────────────────────────────
+void BrushEngine::setTipTexture(const QString &path)
+{
+    m_tipTexturePath = path;
+    auto *tt = dynamic_cast<TextureTip *>(m_tip);
+    if (!tt)
+    {
+        delete m_tip;
+        m_tip = tt = new TextureTip(path, m_tipShapePath);
+        m_compMode = QPainter::CompositionMode_SourceOver;
+    }
+    else
+    {
+        tt->setTexture(path);
+    }
+}
+
+void BrushEngine::setTipShape(const QString &path)
+{
+    m_tipShapePath = path;
+    auto *tt = dynamic_cast<TextureTip *>(m_tip);
+    if (!tt)
+    {
+        delete m_tip;
+        m_tip = tt = new TextureTip(m_tipTexturePath, path);
+        m_compMode = QPainter::CompositionMode_SourceOver;
+    }
+    else
+    {
+        tt->setShape(path);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -151,16 +197,28 @@ void BrushEngine::beginStroke()
     m_lastPressure = 1.0f;
     m_crCount      = 0;
 
-    // Let stateful tips (SmudgeTip, WaterColorTip, …) reset their sample.
+    // Safety: ensure tip is never null
+    if (!m_tip)
+        applyTipType(m_settings);
+
     if (m_tip)
         m_tip->beginStroke();
+
+    // Open the painter once for the whole stroke.
+    // m_layer must be set via setActiveLayer() before beginStroke().
+    if (m_layer)
+    {
+        delete m_painter;
+        m_painter = new QPainter(m_layer);
+        m_painter->setRenderHint(QPainter::Antialiasing, false);
+    }
 }
 
 QRect BrushEngine::addSample(const StrokeSample &s)
 {
     if (!m_inStroke || !m_layer) return {};
 
-    // ── 1. Smooth the raw position ─────────────────────────────────────────
+    // ── 1. Smooth position ────────────────────────────────────────────────
     QPointF smoothed;
     if (m_crCount == 0)
     {
@@ -179,9 +237,12 @@ QRect BrushEngine::addSample(const StrokeSample &s)
     m_lastRaw      = s.pos;
     m_lastSmoothed = smoothed;
 
-    if (m_crCount < 2) return {};
+    // ── Single-click / first-sample fix ───────────────────────────────────
+    // Always stamp on the very first sample so a tap with no drag draws.
+    if (m_crCount < 2)
+        return stampDab(smoothed, s.pressure);
 
-    // ── 2. Segment start / end ─────────────────────────────────────────────
+    // ── 2. Walk the segment ───────────────────────────────────────────────
     const QPointF segEnd   = smoothed;
     const QPointF segStart = m_crBuf[(m_crCount - 2) % kCRBuf];
     const QPointF delta    = segEnd - segStart;
@@ -189,7 +250,6 @@ QRect BrushEngine::addSample(const StrokeSample &s)
                                  delta.x() * delta.x() + delta.y() * delta.y()));
     if (segLen < 0.01f) return {};
 
-    // ── 3. Stamp dabs along segment ────────────────────────────────────────
     const float diameter = m_settings.effectiveDiameter();
     const float spacing  = std::max(diameter * m_settings.spacing, 1.0f);
 
@@ -233,6 +293,9 @@ QRect BrushEngine::endStroke()
     if (m_inStroke && m_layer && m_crCount >= 1)
         r = stampDab(m_lastSmoothed, m_lastPressure);
 
+    delete m_painter;
+    m_painter = nullptr;
+
     m_inStroke  = false;
     m_crCount   = 0;
     m_distAccum = 0.0f;
@@ -254,40 +317,57 @@ QRect BrushEngine::renderStroke(const Stroke &stroke)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Painter suspend / resume
+// ─────────────────────────────────────────────────────────────────────────────
+void BrushEngine::suspendStrokePainter()
+{
+    if (m_painter && m_painter->isActive())
+        m_painter->end();
+}
+
+void BrushEngine::resumeStrokePainter()
+{
+    if (!m_inStroke || !m_layer) return;
+    if (!m_painter) m_painter = new QPainter;
+    if (!m_painter->isActive())
+    {
+        m_painter->begin(m_layer);
+        m_painter->setRenderHint(QPainter::Antialiasing, false);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // stampDab
 // ─────────────────────────────────────────────────────────────────────────────
 QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
 {
-    if (!m_layer || !m_tip) return {};
+    if (!m_layer || !m_tip || !m_painter) return {};
 
-    // Build DabParams from BrushSettings + current pressure
     DabParams dab;
-    dab.center        = pos;
-    dab.diameter      = m_settings.sizeAtPressure(pressure);
-    dab.opacity       = m_settings.opacityAtPressure(pressure);
-    dab.hardness      = m_settings.hardness;
-    dab.pressure      = pressure;
-    dab.color         = m_color;
-    dab.blending      = m_settings.blending;
-    dab.dilution      = m_settings.dilution;
-    dab.persistence   = m_settings.persistence;
-    dab.blurPressure  = m_settings.blurPressure;
-    dab.coloring      = m_settings.coloring;
+    dab.center          = pos;
+    dab.diameter        = m_settings.sizeAtPressure(pressure);
+    dab.opacity         = m_settings.opacityAtPressure(pressure);
+    dab.hardness        = m_settings.hardness;
+    dab.pressure        = pressure;
+    dab.color           = m_color;
+    dab.blending        = m_settings.blending;
+    dab.dilution        = m_settings.dilution;
+    dab.persistence     = m_settings.persistence;
+    dab.blurPressure    = m_settings.blurPressure;
+    dab.coloring        = m_settings.coloring;
     dab.uncolorPressure = m_settings.uncolorPressure;
-    dab.blurWidth     = m_settings.blurWidth;
-    dab.keepOpacity   = m_settings.keepOpacity;
+    dab.blurWidth       = m_settings.blurWidth;
+    dab.keepOpacity     = m_settings.keepOpacity;
 
-    // Map BrushBlendMode to QPainter composition mode
     QPainter::CompositionMode compMode = m_compMode;
     switch (m_settings.blendMode)
     {
-    case BrushBlendMode::Multiply:   compMode = QPainter::CompositionMode_Multiply;    break;
-    case BrushBlendMode::Screen:     compMode = QPainter::CompositionMode_Screen;       break;
-    case BrushBlendMode::Overlay:    compMode = QPainter::CompositionMode_Overlay;      break;
-    case BrushBlendMode::Luminosity: compMode = QPainter::CompositionMode_Lighten;      break;
-    case BrushBlendMode::Shade:      compMode = QPainter::CompositionMode_Darken;       break;
+    case BrushBlendMode::Multiply:   compMode = QPainter::CompositionMode_Multiply;      break;
+    case BrushBlendMode::Screen:     compMode = QPainter::CompositionMode_Screen;         break;
+    case BrushBlendMode::Overlay:    compMode = QPainter::CompositionMode_Overlay;        break;
+    case BrushBlendMode::Luminosity: compMode = QPainter::CompositionMode_Lighten;        break;
+    case BrushBlendMode::Shade:      compMode = QPainter::CompositionMode_Darken;         break;
     case BrushBlendMode::Erase:      compMode = QPainter::CompositionMode_DestinationOut; break;
-    // Vivid / Deep: no direct Qt equivalent; fall back to SourceOver
     case BrushBlendMode::Vivid:
     case BrushBlendMode::Deep:
     case BrushBlendMode::Normal:
@@ -296,11 +376,8 @@ QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
         break;
     }
 
-    QPainter p(m_layer);
-    p.setRenderHint(QPainter::Antialiasing, false);
-    p.setCompositionMode(compMode);
-    m_tip->stamp(p, dab);
-    p.end();
+    m_painter->setCompositionMode(compMode);
+    m_tip->stamp(*m_painter, dab);
 
     const int pad = static_cast<int>(std::ceil(dab.diameter * 0.5f)) + 2;
     return QRect(static_cast<int>(pos.x()) - pad,
@@ -309,7 +386,7 @@ QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Catmull-Rom interpolation
+// Catmull-Rom
 // ─────────────────────────────────────────────────────────────────────────────
 QPointF BrushEngine::catmullRom(const QPointF &p0, const QPointF &p1,
                                  const QPointF &p2, const QPointF &p3, float t)
@@ -323,7 +400,6 @@ QPointF BrushEngine::catmullRom(const QPointF &p0, const QPointF &p1,
     const float t1 = t0 + dist(p0, p1);
     const float t2 = t1 + dist(p1, p2);
     const float t3 = t2 + dist(p2, p3);
-
     const float tc = t1 + t * (t2 - t1);
 
     auto interp = [](QPointF a, QPointF b, float ta, float tb, float tx) -> QPointF {

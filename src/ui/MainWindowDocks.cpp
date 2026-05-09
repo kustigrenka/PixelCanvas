@@ -191,7 +191,8 @@ QWidget *MainWindow::buildNavigatorWidget()
 // ─────────────────────────────────────────────────────────────────────────────
 QWidget *MainWindow::buildColorWidget()
 {
-    auto *colorPanel = new ColorPanelWidget(this);
+    m_colorPanel = new ColorPanelWidget(this);
+    auto *colorPanel = m_colorPanel;
     colorPanel->setMinimumWidth(200);
 
     colorPanel->setBrushEngine(m_brushEngine);

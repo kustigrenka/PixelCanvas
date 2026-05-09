@@ -12,6 +12,7 @@
 #include <QPropertyAnimation>
 #include <QDockWidget>
 #include <QScrollArea>
+#include <QSettings>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AccordionSection
@@ -180,8 +181,13 @@ ColorPanelWidget::ColorPanelWidget(QWidget *parent)
     connect(m_sliders,  &ColorSlidersWidget::colorChanged, this, [this](const QColor &c){ syncColor(c, m_sliders);  });
     connect(m_swatches, &ColorSwatchWidget::colorChanged,  this, [this](const QColor &c){ syncColor(c, m_swatches); });
     connect(m_scratch,  &ScratchPadWidget::colorPicked,    this, [this](const QColor &c){ syncColor(c, m_scratch);  });
-}
 
+    // Restore last used color
+    QSettings s("PixelCanvas", "PixelCanvas");
+    const QColor saved(s.value("lastColor", "#ff000000").toString());
+    if (saved.isValid())
+        setColor(saved);
+}
 QColor ColorPanelWidget::color() const { return m_wheel->color(); }
 
 void ColorPanelWidget::setBrushEngine(BrushEngine *engine)
@@ -205,4 +211,8 @@ void ColorPanelWidget::syncColor(const QColor &c, QObject *source)
     if (source != m_swatches) { QSignalBlocker b(m_swatches); m_swatches->setColor(c); }
     m_scratch->setColor(c);
     emit colorChanged(c);
+    // Save last used color
+    QSettings s("PixelCanvas", "PixelCanvas");
+    s.setValue("lastColor", c.name(QColor::HexArgb));
+    s.sync();
 }
