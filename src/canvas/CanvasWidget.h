@@ -75,6 +75,7 @@ signals:
     void zoomChanged(float zoom);
     void rotationChanged(float degrees);
     void flipHChanged(bool flipped);
+    void canvasUpdated();
 
 private:
     QPointF widgetToCanvas(const QPointF &wp) const;

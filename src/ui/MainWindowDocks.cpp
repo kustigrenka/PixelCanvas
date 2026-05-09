@@ -25,7 +25,8 @@
 #include "ToolbarPanel.h"
 #include "LayerPanel.h"
 #include "LayerStack.h"
-#include "ColorWheelWidget.h"
+#include "ColorPanelWidget.h"
+#include "BrushEngine.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // buildDocks  –  five independent docks
@@ -41,7 +42,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::buildDocks()
 {
-    m_toolbar    = new ToolbarPanel(this);
+    m_toolbar = new ToolbarPanel(m_brushEngine, this);
     m_layerPanel = new LayerPanel(m_layerStack, this);
 
     auto makeDock = [this](const QString &title,
@@ -69,6 +70,12 @@ void MainWindow::buildDocks()
 
     makeDock(tr("Brushes"),   buildBrushWidget(),
              Qt::RightDockWidgetArea, m_dockBrushes,   220);
+
+    // ── Object names (required for restoreState) ──────────────────────────────
+    m_dockNavigator->setObjectName("dockNavigator");
+    m_dockLayers->setObjectName("dockLayers");
+    m_dockColor->setObjectName("dockColor");
+    m_dockBrushes->setObjectName("dockBrushes");
 
     splitDockWidget(m_dockNavigator, m_dockLayers,   Qt::Vertical);
     splitDockWidget(m_dockColor,     m_dockBrushes,  Qt::Vertical);
@@ -131,6 +138,7 @@ QWidget *MainWindow::buildNavigatorWidget()
     connect(m_canvas,     &CanvasWidget::zoomChanged,          thumb, [thumb](float)  { thumb->update(); });
     connect(m_layerStack, &LayerStack::layersChanged,          thumb, [thumb]()       { thumb->update(); });
     connect(m_layerStack, &LayerStack::layerPropertiesChanged, thumb, [thumb]()       { thumb->update(); });
+    connect(m_canvas,     &CanvasWidget::canvasUpdated,        thumb, [thumb]()       { thumb->update(); });
     l->addWidget(thumb, 1);
 
     // Scale row
@@ -183,25 +191,17 @@ QWidget *MainWindow::buildNavigatorWidget()
 // ─────────────────────────────────────────────────────────────────────────────
 QWidget *MainWindow::buildColorWidget()
 {
-    auto *w = new QWidget(this);
-    auto *l = new QVBoxLayout(w);
-    l->setContentsMargins(6, 6, 6, 6);
-    l->setSpacing(6);
+    auto *colorPanel = new ColorPanelWidget(this);
+    colorPanel->setMinimumWidth(200);
 
-    auto *wheel = m_toolbar->takeColorWheel();
-    if (wheel) {
-        wheel->setParent(w);
-        wheel->setMinimumHeight(180);
-        l->addWidget(wheel);
-    }
+    colorPanel->setBrushEngine(m_brushEngine);
 
-    auto *swatchRow = m_toolbar->takeSwatchRow(w);
-    if (swatchRow) l->addWidget(swatchRow);
+    connect(colorPanel, &ColorPanelWidget::colorChanged,
+            m_brushEngine, &BrushEngine::setColor);
 
-    l->addStretch();
-    return w;
+    return colorPanel;
 }
-
+ 
 // ─────────────────────────────────────────────────────────────────────────────
 // Brush widget  –  brush type tabs + blend row + preset list + sliders
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,5 +219,3 @@ QWidget *MainWindow::buildBrushWidget()
     scroll->setWidget(brushBody);
     return scroll;
 }
-
-

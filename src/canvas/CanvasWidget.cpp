@@ -29,8 +29,8 @@ CanvasWidget::CanvasWidget(LayerStack  *layerStack,
 {
     setFocusPolicy(Qt::StrongFocus);
     setAttribute(Qt::WA_AcceptTouchEvents, false);
-    setCursor(Qt::BlankCursor);          // we draw our own circle cursor
-    setMouseTracking(true);              // get moves even when no button held
+    setCursor(Qt::BlankCursor);
+    setMouseTracking(true);
 }
 
 CanvasWidget::~CanvasWidget() = default;
@@ -63,15 +63,12 @@ void CanvasWidget::paintGL()
     p.fillRect(rect(), QColor(0x6E, 0x6E, 0x6E));
     p.setRenderHint(QPainter::SmoothPixmapTransform, m_zoom < 1.0);
 
-    // ── Viewport transform: translate → rotate → flip → scale ────────────────
-    // All transforms are applied around the canvas centre so rotation and flip
-    // feel natural (pivot = centre of canvas in widget space).
     const QPointF canvasCentre(
         m_composited.width()  * m_zoom * 0.5,
         m_composited.height() * m_zoom * 0.5);
 
     p.translate(m_offset + canvasCentre);
-    if (m_flipH)     p.scale(-1.0, 1.0);
+    if (m_flipH)             p.scale(-1.0, 1.0);
     if (m_rotation != 0.0f) p.rotate(static_cast<double>(m_rotation));
     p.scale(m_zoom, m_zoom);
     p.translate(-m_composited.width() * 0.5, -m_composited.height() * 0.5);
@@ -83,12 +80,13 @@ void CanvasWidget::paintGL()
     p.setBrush(Qt::NoBrush);
     p.drawRect(QRectF(QPointF(0, 0), QSizeF(m_composited.size())));
 
-    // ── Brush cursor circle (drawn in widget space, after transform reset) ────
+    // ── Brush cursor circle (widget space) ───────────────────────────────────
     if (m_cursorOnCanvas && !m_spaceHeld && !m_altHeld)
     {
         p.resetTransform();
+        // Use effectiveDiameter() so the circle matches what actually gets drawn
         const float brushDiameterWidget =
-            m_brushEngine->settings().size * m_zoom;
+            m_brushEngine->settings().effectiveDiameter() * m_zoom;
         const float r = brushDiameterWidget * 0.5f;
 
         p.setPen(QPen(Qt::white, 1.5));
@@ -105,29 +103,24 @@ void CanvasWidget::paintGL()
 
 QPointF CanvasWidget::widgetToCanvas(const QPointF &wp) const
 {
-    // Invert the same transform applied in paintGL:
-    // 1. Subtract the widget-space canvas centre (offset + half canvas in zoom space)
     const QPointF canvasCentre(
         m_composited.width()  * m_zoom * 0.5,
         m_composited.height() * m_zoom * 0.5);
-    QPointF p = wp - (m_offset + canvasCentre);
+    QPointF pt = wp - (m_offset + canvasCentre);
 
-    // 2. Undo flip
-    if (m_flipH) p.setX(-p.x());
+    if (m_flipH) pt.setX(-pt.x());
 
-    // 3. Undo rotation (rotate by -angle)
     if (m_rotation != 0.0f) {
         const double rad = -static_cast<double>(m_rotation) * M_PI / 180.0;
         const double c   = std::cos(rad);
         const double s   = std::sin(rad);
-        p = QPointF(c * p.x() - s * p.y(),
-                    s * p.x() + c * p.y());
+        pt = QPointF(c * pt.x() - s * pt.y(),
+                     s * pt.x() + c * pt.y());
     }
 
-    // 4. Undo scale and re-centre to canvas origin
-    p /= m_zoom;
-    p += QPointF(m_composited.width() * 0.5, m_composited.height() * 0.5);
-    return p;
+    pt /= m_zoom;
+    pt += QPointF(m_composited.width() * 0.5, m_composited.height() * 0.5);
+    return pt;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -143,7 +136,6 @@ void CanvasWidget::setZoom(float zoom)
 
 void CanvasWidget::setRotation(float degrees)
 {
-    // Normalise to -180…+180
     float r = std::fmod(degrees, 360.0f);
     if (r >  180.0f) r -= 360.0f;
     if (r < -180.0f) r += 360.0f;
@@ -190,15 +182,19 @@ void CanvasWidget::recompositeRect(const QRect &dirty)
     if (dirty.isEmpty()) return;
     m_layerStack->recompositeRect(m_composited, dirty);
 
-    const QRectF widgetDirty(m_offset.x() + dirty.x() * m_zoom,
-                              m_offset.y() + dirty.y() * m_zoom,
-                              dirty.width()  * m_zoom,
-                              dirty.height() * m_zoom);
+    // Expand slightly to cover antialiased edges, then schedule a repaint
+    // of only the affected widget region.
+    const QRectF widgetDirty(
+        m_offset.x() + dirty.x() * m_zoom,
+        m_offset.y() + dirty.y() * m_zoom,
+        dirty.width()  * m_zoom,
+        dirty.height() * m_zoom);
     update(widgetDirty.toAlignedRect().adjusted(-2, -2, 2, 2));
+    emit canvasUpdated();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shared pointer logic
+// Pointer logic  (shared by tablet + mouse paths)
 // ─────────────────────────────────────────────────────────────────────────────
 
 void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
@@ -212,13 +208,17 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
         return;
     }
 
+    // Skip drawing for non-painting tools (Bucket etc.) — handled separately
+    const TipType tt = m_brushEngine->settings().tipType;
+    if (tt == TipType::Bucket || tt == TipType::Gradient)
+        return;
+
     if (m_undoStack)
-        m_undoStack->pushSnapshot(m_layerStack->activeIndex(), m_layerStack->activeLayer()->pixels);
+        m_undoStack->pushSnapshot(m_layerStack->activeIndex(),
+                                  m_layerStack->activeLayer()->pixels);
 
     if (Layer *l = m_layerStack->activeLayer())
         m_brushEngine->setActiveLayer(&l->pixels);
-    else
-        Q_ASSERT(false && "LayerStack has no active layer at init");
 
     m_drawing = true;
     m_brushEngine->beginStroke();
@@ -229,8 +229,10 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
     s.tiltX    = tiltX;
     s.tiltY    = tiltY;
     s.rotation = rotation;
+
     const QRect dirty = m_brushEngine->addSample(s);
-    recompositeRect(dirty);
+    if (!dirty.isEmpty())
+        recompositeRect(dirty);
 
     emit cursorMoved(s.pos, pressure);
 }
@@ -253,8 +255,11 @@ void CanvasWidget::pointerUpdate(const QPointF &widgetPos, float pressure,
     s.tiltX    = tiltX;
     s.tiltY    = tiltY;
     s.rotation = rotation;
+
     const QRect dirty = m_brushEngine->addSample(s);
-    recompositeRect(dirty);
+    // Only recomposite+repaint if the brush actually stamped a dab
+    if (!dirty.isEmpty())
+        recompositeRect(dirty);
 
     emit cursorMoved(s.pos, pressure);
 }
@@ -265,7 +270,8 @@ void CanvasWidget::pointerEnd()
     if (m_drawing)
     {
         const QRect dirty = m_brushEngine->endStroke();
-        recompositeRect(dirty);
+        if (!dirty.isEmpty())
+            recompositeRect(dirty);
         m_drawing = false;
     }
 }
@@ -278,7 +284,7 @@ void CanvasWidget::tabletEvent(QTabletEvent *e)
 {
     e->accept();
 
-    if (m_altHeld) return;  // TODO Ph.8: eyedropper
+    if (m_altHeld) return;  // eyedropper — TODO Ph.8
 
     const float pressure = static_cast<float>(e->pressure());
     const float tiltX    = static_cast<float>(e->xTilt());
@@ -295,6 +301,8 @@ void CanvasWidget::tabletEvent(QTabletEvent *e)
     case QEvent::TabletMove:
         m_cursorPos = e->position();
         pointerUpdate(e->position(), pressure, tiltX, tiltY, rotation);
+        // Always repaint cursor circle even if no dab was stamped
+        update();
         break;
     case QEvent::TabletRelease:
         pointerEnd();
@@ -325,13 +333,14 @@ void CanvasWidget::mousePressEvent(QMouseEvent *e)
 void CanvasWidget::mouseMoveEvent(QMouseEvent *e)
 {
     if (m_tabletInUse) return;
-    const QPointF prev = m_cursorPos;
     m_cursorPos = e->position();
-    // Repaint only the small regions around old and new cursor positions
-    const float r = m_brushEngine->settings().size * m_zoom * 0.5f + 4.0f;
-    update(QRectF(prev        - QPointF(r, r), QSizeF(r * 2, r * 2)).toAlignedRect());
-    update(QRectF(m_cursorPos - QPointF(r, r), QSizeF(r * 2, r * 2)).toAlignedRect());
+
+    // pointerUpdate calls recompositeRect which calls update() for dirty rects.
+    // If not drawing we still need a repaint for the cursor circle — one update()
+    // covers both cases because Qt coalesces multiple update() calls per frame.
     pointerUpdate(e->position(), 1.0f, 0.f, 0.f, 0.f);
+    if (!m_drawing)
+        update();
 }
 
 void CanvasWidget::mouseReleaseEvent(QMouseEvent *e)
@@ -343,7 +352,7 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *e)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Enter / Leave  — show/hide brush cursor circle
+// Enter / Leave
 // ─────────────────────────────────────────────────────────────────────────────
 
 void CanvasWidget::enterEvent(QEnterEvent *e)
@@ -453,7 +462,8 @@ void CanvasWidget::applyFilter(Filter *filter)
 {
     if (!filter) return;
     if (m_undoStack)
-        m_undoStack->pushSnapshot(m_layerStack->activeIndex(), m_layerStack->activeLayer()->pixels);
+        m_undoStack->pushSnapshot(m_layerStack->activeIndex(),
+                                  m_layerStack->activeLayer()->pixels);
     m_layerStack->applyFilterToActive(filter);
     recompositeRect(m_composited.rect());
 }
@@ -469,7 +479,6 @@ void CanvasWidget::reinitCanvas()
     m_composited = QImage(newSize, QImage::Format_ARGB32_Premultiplied);
     m_composited.fill(Qt::white);
 
-    // Refresh brush engine pointer — old layer pixels were freed by LayerStack::init()
     if (Layer *l = m_layerStack->activeLayer())
         m_brushEngine->setActiveLayer(&l->pixels);
 

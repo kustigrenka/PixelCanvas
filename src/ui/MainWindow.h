@@ -58,6 +58,9 @@ private slots:
     void onResetZoom();
     void onFlipH();
     void onStabilizerChanged(int level);
+    
+protected:
+    void closeEvent(QCloseEvent *event) override;
 
 private:
     // ── Setup helpers (defined across the four .cpp files) ────────────────────

@@ -116,17 +116,27 @@ void LayerStack::recompositeRect(QImage &dest, const QRect &dirty)
     const QRect region = dirty.intersected(dest.rect());
     if (region.isEmpty()) return;
 
-    // Single QPainter for the whole operation — safer than opening two
     QPainter p(&dest);
+
+    // ── 1. Fill with canvas background (white) ────────────────────────────────
+    // Must use CompositionMode_Source so we fully overwrite dest pixels —
+    // including any alpha from a previous eraser stroke.  Without this,
+    // erased (transparent) pixels on the active layer composite onto stale
+    // dest content instead of the white background.
     p.setCompositionMode(QPainter::CompositionMode_Source);
     p.fillRect(region, Qt::white);
 
+    // ── 2. Composite each visible layer in order ──────────────────────────────
     for (const Layer *layer : m_layers) {
         if (!layer->visible) continue;
         p.setOpacity(layer->opacity);
         p.setCompositionMode(layer->blendMode);
+        // Draw only the dirty sub-region from the layer
         p.drawImage(region.topLeft(), layer->pixels, region);
     }
+
+    // Reset opacity so nothing downstream is affected
+    p.setOpacity(1.0);
 }
 
 // ─── Filter ──────────────────────────────────────────────────────────────────

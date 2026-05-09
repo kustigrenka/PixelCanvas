@@ -23,6 +23,7 @@
 #include <QShortcut>
 #include <QMessageBox>
 #include <QApplication>
+#include <QSettings>
 
 #include "CanvasWidget.h"
 #include "ToolbarPanel.h"
@@ -33,7 +34,6 @@
 #include "UndoStack.h"
 #include "Layer.h"
 #include "AppStyleSheet.h"
-#include "ColorWheelWidget.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -43,6 +43,7 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle("PixelCanvas");
     resize(1400, 900);
     setDockOptions(QMainWindow::AnimatedDocks | QMainWindow::AllowTabbedDocks);
+    setObjectName("MainWindow");
 
     // ── Core objects ──────────────────────────────────────────────────────────
     m_layerStack  = new LayerStack(this);
@@ -58,7 +59,10 @@ MainWindow::MainWindow(QWidget *parent)
     // ── UI shell ──────────────────────────────────────────────────────────────
     buildMenuBar();
     buildQuickBar();
-    buildDocks();        // defined in MainWindowDocks.cpp
+    buildDocks();
+    QSettings s("YourOrg", "YourApp");
+    restoreGeometry(s.value("window/geometry").toByteArray());
+    restoreState(s.value("window/state").toByteArray());        // defined in MainWindowDocks.cpp
     buildStatusBar();
     connectSignals();
     applyShortcuts();
@@ -360,4 +364,12 @@ void MainWindow::onExportFlat()
         !path.endsWith(QLatin1String(".jpeg"), Qt::CaseInsensitive))
         path += QStringLiteral(".png");
     m_projectIO->exportFlat(path);
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    QSettings s("YourOrg", "YourApp");
+    s.setValue("window/geometry", saveGeometry());
+    s.setValue("window/state",    saveState());
+    QMainWindow::closeEvent(event);
 }
