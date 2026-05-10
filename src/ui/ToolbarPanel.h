@@ -28,8 +28,10 @@ class QGridLayout;
 struct BrushSlot
 {
     bool          empty    = true;
-    QString       name;           // max 10 chars
+    QString       name;
     BrushSettings settings;
+    QString       shapePath;    // ← add
+    QString       texturePath;  // ← add
 
     bool isEmpty() const { return empty; }
 };
@@ -56,6 +58,8 @@ public:
     static BrushSettings defaultSettings(TipType tt);
 
     void onExternalColorChanged(const QColor &color);
+
+    void saveSettings();
 
 signals:
     void brushSettingsChanged(const BrushSettings &settings);
@@ -198,4 +202,5 @@ private:
 
     // convenience: current settings live here, kept in sync with active slot
     BrushSettings m_settings;
+    void loadSettings();
 };

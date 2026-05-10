@@ -69,6 +69,10 @@ signals:
     void colorPicked(const QColor &color);
 
 private:
+
+    bool    m_shiftHeld      = false;
+    QPointF m_shiftLineStart;   // canvas-space anchor set when shift is first pressed
+    bool    m_shiftLineActive = false;
     bool m_dirty = false;
     QPointF widgetToCanvas(const QPointF &wp) const;
     void recompositeRect(const QRect &dirty);

@@ -34,10 +34,10 @@ void MainWindow::onNewCanvas()
     form->setColumnStretch(1, 1);
 
     auto *wSpin = new QSpinBox(&dlg);
-    wSpin->setRange(1, 16384); wSpin->setValue(2048); wSpin->setSuffix(" px");
+    wSpin->setRange(1, 16384); wSpin->setValue(512); wSpin->setSuffix(" px");
 
     auto *hSpin = new QSpinBox(&dlg);
-    hSpin->setRange(1, 16384); hSpin->setValue(2048); hSpin->setSuffix(" px");
+    hSpin->setRange(1, 16384); hSpin->setValue(512); hSpin->setSuffix(" px");
 
     auto *dpiSpin = new QSpinBox(&dlg);
     dpiSpin->setRange(72, 1200); dpiSpin->setValue(96); dpiSpin->setSuffix(" dpi");

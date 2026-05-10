@@ -48,19 +48,7 @@ CanvasWidget::~CanvasWidget() = default;
 // QOpenGLWidget lifecycle
 // ─────────────────────────────────────────────────────────────────────────────
 
-void CanvasWidget::initializeGL()
-{
-    const QSize canvasSize(2048, 2048);
-    m_composited = QImage(canvasSize, QImage::Format_ARGB32_Premultiplied);
-    m_composited.fill(Qt::white);
-
-    m_layerStack->init(canvasSize);
-
-    if (Layer *l = m_layerStack->activeLayer())
-        m_brushEngine->setActiveLayer(&l->pixels);
-
-    resetView();
-}
+void CanvasWidget::initializeGL() {}
 
 void CanvasWidget::resizeGL(int /*w*/, int /*h*/) {}
 
@@ -68,6 +56,9 @@ void CanvasWidget::paintGL()
 {
     QPainter p(this);
     p.fillRect(rect(), QColor(0x6E, 0x6E, 0x6E));
+
+    if (m_composited.isNull()) return;
+
     p.setRenderHint(QPainter::SmoothPixmapTransform, m_zoom < 1.0);
 
     const QPointF canvasCentre(
@@ -81,6 +72,13 @@ void CanvasWidget::paintGL()
     p.translate(-m_composited.width() * 0.5, -m_composited.height() * 0.5);
 
     p.drawImage(QPointF(0, 0), m_composited);
+
+    // Shift straight-line preview — drawn in canvas space, before border
+    if (m_shiftLineActive && m_shiftHeld && m_cursorOnCanvas)
+    {
+        p.setPen(QPen(QColor(100, 160, 255, 160), 1.0 / m_zoom, Qt::DashLine));
+        p.drawLine(m_shiftLineStart, widgetToCanvas(m_cursorPos));
+    }
 
     p.setCompositionMode(QPainter::CompositionMode_SourceOver);
     p.setPen(QPen(QColor(0x30, 0x30, 0x30), 1.0 / m_zoom));
@@ -188,18 +186,43 @@ void CanvasWidget::recompositeRect(const QRect &dirty)
 
     m_layerStack->recompositeRect(m_composited, dirty);
 
-    // During a dry-media stroke, blend the scratch layer on top of the
-    // composited view so the user sees the stroke before it is committed
-    // to the real layer on endStroke.
     if (m_drawing && m_brushEngine->hasScratch())
     {
         const QImage *scratch = m_brushEngine->strokeScratch();
         if (scratch && !scratch->isNull())
         {
-            QPainter sp(&m_composited);
-            sp.setCompositionMode(QPainter::CompositionMode_SourceOver);
-            sp.setOpacity(static_cast<double>(m_brushEngine->settings().opacity));
-            sp.drawImage(dirty, *scratch, dirty);
+            const BrushSettings &bs = m_brushEngine->settings();
+            const bool isEraser = bs.tipType == TipType::Eraser ||
+                                  bs.tipType == TipType::SelEraser ||
+                                  bs.blendMode == BrushBlendMode::Erase;
+
+            if (isEraser)
+            {
+                // Apply erase to a temp copy of the active layer pixels,
+                // then recomposite that region so the white background shows through.
+                if (Layer *layer = m_layerStack->activeLayer())
+                {
+                    QImage tempLayer = layer->pixels.copy(dirty);
+                    QPainter tp(&tempLayer);
+                    tp.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+                    tp.drawImage(QRect(0, 0, dirty.width(), dirty.height()),
+                                 *scratch, dirty);
+                    tp.end();
+
+                    QPainter sp(&m_composited);
+                    sp.setCompositionMode(QPainter::CompositionMode_Source);
+                    sp.fillRect(dirty, Qt::white);
+                    sp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+                    sp.drawImage(dirty.topLeft(), tempLayer);
+                }
+            }
+            else
+            {
+                QPainter sp(&m_composited);
+                sp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+                sp.setOpacity(static_cast<double>(bs.opacity));
+                sp.drawImage(dirty, *scratch, dirty);
+            }
         }
     }
 
@@ -298,12 +321,19 @@ void CanvasWidget::doBucketFill(const QPointF &canvasPos)
 void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
                                 float tiltX, float tiltY, float rotation)
 {
+    if (m_composited.isNull()) return;
+
     if (m_spaceHeld || m_middlePanning)
     {
         m_panning        = true;
         m_panStartWidget = widgetPos;
         m_panStartOffset = m_offset;
         return;
+    }
+
+    if (m_shiftHeld) {
+        m_shiftLineStart  = widgetToCanvas(widgetPos);
+        m_shiftLineActive = true;
     }
 
     const TipType tt = m_brushEngine->settings().tipType;
@@ -379,7 +409,6 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
 
     emit cursorMoved(s.pos, pressure);
 }
-
 void CanvasWidget::pointerUpdate(const QPointF &widgetPos, float pressure,
                                  float tiltX, float tiltY, float rotation)
 {
@@ -438,10 +467,30 @@ void CanvasWidget::pointerEnd()
         else
         {
             if (m_recordingEnabled) m_recorder.recordEnd();
-            const QRect dirty = m_brushEngine->endStroke();
+
+            QRect dirty;
+            if (m_shiftLineActive && m_shiftHeld)
+            {
+                // Cancel the in-progress stroke and replace it with a
+                // clean straight line from the shift anchor to the cursor.
+                m_brushEngine->endStroke();   // discard accumulated dabs
+
+                const QPointF end = widgetToCanvas(m_cursorPos);
+                StrokeSample s0, s1;
+                s0.pos      = m_shiftLineStart; s0.pressure = 1.0f;
+                s1.pos      = end;              s1.pressure = 1.0f;
+                Stroke line; line << s0 << s1;
+                dirty = m_brushEngine->renderStroke(line);
+                m_shiftLineActive = false;
+            }
+            else
+            {
+                dirty = m_brushEngine->endStroke();
+            }
+
             if (!dirty.isEmpty())
                 recompositeRect(dirty);
-            // Push post-stroke snapshot so undo slider can reach the latest state
+
             if (m_undoStack && m_layerStack->activeLayer())
                 m_undoStack->pushSnapshot(m_layerStack->activeIndex(),
                                           m_layerStack->activeLayer()->pixels);
@@ -612,6 +661,9 @@ void CanvasWidget::keyPressEvent(QKeyEvent *e)
         BrushSettings s = m_brushEngine->settings();
         s.size = std::min(500.0f, s.size + 2.0f);
         m_brushEngine->setSettings(s); update(); break; }
+    case Qt::Key_Shift:
+        if (!e->isAutoRepeat()) m_shiftHeld = true;
+        break;
     default:
         QOpenGLWidget::keyPressEvent(e); break;
     }
@@ -627,6 +679,13 @@ void CanvasWidget::keyReleaseEvent(QKeyEvent *e)
     case Qt::Key_Alt:
         m_altHeld = false; setCursor(Qt::BlankCursor);
         break;
+    case Qt::Key_Shift:
+    if (!e->isAutoRepeat()) {
+        m_shiftHeld       = false;
+        m_shiftLineActive = false;
+        update();
+    }
+    break;
     default:
         QOpenGLWidget::keyReleaseEvent(e); break;
     }

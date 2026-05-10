@@ -176,26 +176,24 @@ BrushSettings ToolbarPanel::defaultSettings(TipType tt)
 }
 
 // 
-// 12 built-in slots
+// 10 built-in slots
 // 
 static void fillBuiltinSlots(QVector<BrushSlot> &brush_slots)
 {
     struct BI { const char *name; TipType tt; };
-    static const BI builtins[12] = {
+    static const BI builtins[10] = {
         {"Pencil",   TipType::Pixel     },
         {"AirBrush", TipType::Airbrush  },
         {"Brush",    TipType::Brush     },
         {"Water",    TipType::WaterColor},
         {"Eraser",   TipType::Eraser    },
         {"Marker",   TipType::Marker    },
-        {"SelPen",   TipType::SelPen    },
-        {"SelErs",   TipType::SelEraser },
         {"Bucket",   TipType::Bucket    },
         {"Gradient", TipType::Gradient  },
         {"Blur",     TipType::Blur      },
         {"Smudge",   TipType::Smudge    },
     };
-    for (int i = 0; i < 12; ++i) {
+    for (int i = 0; i < 10; ++i) {
         BrushSlot sl;
         sl.empty    = false;
         sl.name     = builtins[i].name;
@@ -231,6 +229,7 @@ void ToolbarPanel::ensureBuilt()
     buildColorSection();
     buildSwatchRow();
     buildBrushBody();
+    loadSettings(); 
 
     // Re-apply restored color now that all widgets exist
     if (m_colorWheel) m_colorWheel->setColor(m_primary);
@@ -331,7 +330,7 @@ void ToolbarPanel::buildBrushBody()
     //  2. Name + preview 
     m_nameLbl = new QLabel(m_brushBody);
     m_nameLbl->setAlignment(Qt::AlignHCenter);
-    m_nameLbl->setStyleSheet("color:#; font-size:11px; font-weight:bold;");
+    m_nameLbl->setStyleSheet("color:#ccc; font-size:11px; font-weight:bold;");
     root->addWidget(m_nameLbl);
 
     m_previewLabel = new QLabel(m_brushBody);
@@ -587,6 +586,8 @@ void ToolbarPanel::buildBrushBody()
         updatePreview();
     });
 
+    m_textureRow->setProperty("texCombo", QVariant::fromValue(static_cast<QObject*>(texCombo)));
+
     root->addWidget(m_textureRow);
 
     root->addWidget(makeSep(m_brushBody));
@@ -702,7 +703,7 @@ void ToolbarPanel::rebuildGrid()
         });
 
         // Right-click context menu for custom (non-builtin) slots
-        if (!m_slots[i].empty && i >= 12) {
+        if (!m_slots[i].empty && i >= 10) {
             btn->setContextMenuPolicy(Qt::CustomContextMenu);
             connect(btn, &QToolButton::customContextMenuRequested, this, [this, idx](const QPoint &pt){
                 QMenu menu;
@@ -748,7 +749,7 @@ void ToolbarPanel::selectSlot(int index)
 
 void ToolbarPanel::addCustomBrush(int slotIndex)
 {
-    if (slotIndex < 12 || slotIndex >= kTotalSlots) return; // only user slots
+    if (slotIndex < 10 || slotIndex >= kTotalSlots) return; // only user slots
 
     //  Dialog: name + base type 
     QDialog dlg;
@@ -763,7 +764,7 @@ void ToolbarPanel::addCustomBrush(int slotIndex)
 
     auto *typeCombo = new QComboBox(&dlg);
     typeCombo->addItems({"Pencil","AirBrush","Brush","WaterColor",
-                         "Eraser","Marker","SelPen","SelEraser",
+                         "Eraser","Marker",
                          "Bucket","Gradient","Blur","Smudge"});
     dlgLayout->addWidget(new QLabel(tr("Base type:"), &dlg));
     dlgLayout->addWidget(typeCombo);
@@ -797,7 +798,7 @@ void ToolbarPanel::addCustomBrush(int slotIndex)
 
 void ToolbarPanel::removeSlot(int index)
 {
-    if (index < 12 || index >= kTotalSlots) return;
+    if (index < 10 || index >= kTotalSlots) return;
     m_slots[index] = BrushSlot{}; // reset to empty
 
     if (m_activeSlot == index) {
@@ -855,20 +856,65 @@ void ToolbarPanel::loadSlotIntoUI(int index)
             if (modes[i] == s.blendMode) { m_blendCombo->setCurrentIndex(i); break; }
     }
 
-    // Unified shape combo: indices 0-2 = built-ins, 3+ = imported BMPs.
-    // When loading a slot just restore to the stored brushShape (0-2).
-    // Custom BMP shapes are per-stroke state, not persisted per-slot.
+    // Restore shape/texture into engine.
+    // Built-in shapes (1=diamond, 2=square) must clear the BMP path so
+    // PixelTip is used and brushShape is respected. Only shape index 0
+    // (circle) can have an imported BMP path.
+    if (m_brushEngine) {
+        if (s.brushShape == 1 || s.brushShape == 2) {
+            m_brushEngine->setTipShape({});
+            m_brushEngine->setTipTexture(m_slots[index].texturePath);
+        } else {
+            m_brushEngine->setTipShape(m_slots[index].shapePath);
+            m_brushEngine->setTipTexture(m_slots[index].texturePath);
+        }
+    }
+
+    // Restore shape combo selection
     if (m_shapeRow) {
         auto *shapeCombo = qobject_cast<QComboBox*>(
             qvariant_cast<QObject*>(m_shapeRow->property("shapeCombo")));
         if (shapeCombo) {
             const QSignalBlocker b(shapeCombo);
-            const int idx = (s.brushShape >= 0 && s.brushShape <= 2) ? s.brushShape : 0;
-            shapeCombo->setCurrentIndex(idx);
+            if (s.brushShape == 1 || s.brushShape == 2) {
+                shapeCombo->setCurrentIndex(s.brushShape);
+            } else if (!m_slots[index].shapePath.isEmpty()) {
+                bool found = false;
+                for (int i = 3; i < shapeCombo->count(); ++i) {
+                    if (shapeCombo->itemData(i).toString() == m_slots[index].shapePath) {
+                        shapeCombo->setCurrentIndex(i);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) shapeCombo->setCurrentIndex(0);
+            } else {
+                shapeCombo->setCurrentIndex(0);
+            }
         }
     }
-    // Clear any BMP shape so the slot starts clean
-    if (m_brushEngine) m_brushEngine->setTipShape({});
+
+    // Restore texture combo selection
+    if (m_textureRow) {
+        auto *texCombo = qobject_cast<QComboBox*>(
+            qvariant_cast<QObject*>(m_textureRow->property("texCombo")));
+        if (texCombo) {
+            const QSignalBlocker b(texCombo);
+            if (!m_slots[index].texturePath.isEmpty()) {
+                bool found = false;
+                for (int i = 1; i < texCombo->count(); ++i) {
+                    if (texCombo->itemData(i).toString() == m_slots[index].texturePath) {
+                        texCombo->setCurrentIndex(i);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) texCombo->setCurrentIndex(0);
+            } else {
+                texCombo->setCurrentIndex(0);
+            }
+        }
+    }
 
     m_activeShape = s.brushShape;
 
@@ -884,9 +930,15 @@ void ToolbarPanel::saveUIIntoSlot(int index)
 {
     if (index < 0 || index >= kTotalSlots || m_slots[index].empty) return;
     m_slots[index].settings = m_settings;
-    // No icon to refresh — grid is text-only
+    if (m_brushEngine) {
+        // Built-in shapes 1/2 (diamond/square) use no BMP — never save a path for them
+        if (m_settings.brushShape == 1 || m_settings.brushShape == 2)
+            m_slots[index].shapePath = {};
+        else
+            m_slots[index].shapePath = m_brushEngine->currentShapePath();
+        m_slots[index].texturePath = m_brushEngine->currentTexturePath();
+    }
 }
-
 // 
 // Preview
 // 
@@ -894,87 +946,135 @@ void ToolbarPanel::updatePreview()
 {
     if (!m_previewLabel) return;
 
+    const BrushSettings &s = m_settings;
+    const TipType tt = s.tipType;
+
+    const bool canDraw = (tt != TipType::Bucket   && tt != TipType::Gradient &&
+                          tt != TipType::Blur      && tt != TipType::Smudge   &&
+                          tt != TipType::SelPen    && tt != TipType::SelEraser);
+
+    m_previewLabel->setVisible(canDraw);
+    if (!canDraw || m_slots[m_activeSlot].empty) return;
+
     const int W = m_previewLabel->width()  > 0 ? m_previewLabel->width()  : 200;
     const int H = m_previewLabel->height() > 0 ? m_previewLabel->height() : 60;
 
     QImage img(W, H, QImage::Format_ARGB32_Premultiplied);
-    img.fill(QColor("#111"));
 
-    if (!m_slots[m_activeSlot].empty) {
-        const BrushSettings &s = m_settings;
-        const TipType tt = s.tipType;
+    const bool isWetTip = (tt == TipType::Brush ||
+                           tt == TipType::WaterColor ||
+                           tt == TipType::Marker);
 
-        const bool canDraw = (tt != TipType::Bucket && tt != TipType::Gradient &&
-                              tt != TipType::SelPen  && tt != TipType::SelEraser);
+    if (tt == TipType::Eraser)
+        img.fill(Qt::black);
+    else if (isWetTip)
+        img.fill(QColor("#666"));
+    else
+        img.fill(QColor("#111"));
 
-        if (canDraw) {
-            // Cap preview size so it fits the preview strip
-            BrushSettings ps = s;
-            ps.size = std::min(s.effectiveDiameter(), (float)(H - 8));
-            ps.sizeMultiplier = 1.0f;
+    // Cap preview size so it fits the preview strip
+    BrushSettings ps = s;
+    ps.size = std::min(s.effectiveDiameter(), (float)(H - 8));
+    ps.sizeMultiplier = 1.0f;
 
-            const float cy      = H * 0.5f;
-            const float r       = ps.size * 0.5f;
-            const float spacing = std::max(r * s.spacing, 1.0f);
+    const float cy      = H * 0.5f;
+    const float r       = ps.size * 0.5f;
+    const float spacing = std::max(r * s.spacing, 1.0f);
 
-            // Build the correct tip for the current type, mirroring BrushEngine::applyTipType
-            BrushTip *tip = nullptr;
-            switch (tt) {
-            case TipType::Airbrush:   tip = new AirbrushTip;   break;
-            case TipType::Eraser:     tip = new EraserTip;     break;
-            case TipType::Brush:      tip = new BrushTipWet;   break;
-            case TipType::WaterColor: tip = new WaterColorTip; break;
-            case TipType::Marker:     tip = new MarkerTip;     break;
-            case TipType::Smudge:     tip = new SmudgeTip;     break;
-            case TipType::Blur:       tip = new BlurTip;       break;
-            case TipType::Chalk:      tip = new ChalkTip;      break;
-            default:
-                // Pixel — use TextureTip if a shape BMP is active, else PixelTip
-                if (m_brushEngine) {
-                    const QString shapePath = m_brushEngine->currentShapePath();
-                    const QString texPath   = m_brushEngine->currentTexturePath();
-                    if (!shapePath.isEmpty() || !texPath.isEmpty())
-                        tip = new TextureTip(texPath, shapePath);
-                }
-                if (!tip) tip = new PixelTip;
-                break;
-            }
-
-            QPainter p(&img);
-            p.setCompositionMode(tt == TipType::Eraser
-                                 ? QPainter::CompositionMode_DestinationOut
-                                 : QPainter::CompositionMode_SourceOver);
-
-            if (tip) tip->beginStroke();
-
-            DabParams dab;
-            dab.diameter        = ps.size;
-            dab.hardness        = s.hardness;
-            dab.opacity         = s.opacity;
-            dab.pressure        = 1.0f;
-            dab.color           = m_primary;
-            dab.blending        = s.blending;
-            dab.dilution        = s.dilution;
-            dab.persistence     = s.persistence;
-            dab.blurPressure    = s.blurPressure;
-            dab.coloring        = s.coloring;
-            dab.uncolorPressure = s.uncolorPressure;
-            dab.blurWidth       = s.blurWidth;
-            dab.keepOpacity     = s.keepOpacity;
-            dab.brushShape      = s.brushShape;
-            dab.textureStrength = s.textureStrength;
-
-            float x = r;
-            while (x < W - r) {
-                const float wave = std::sin(x * 0.05f) * (H * 0.18f);
-                dab.center = QPointF(x, cy + wave);
-                if (tip) tip->stamp(p, dab);
-                x += spacing;
-            }
-            p.end();
-            delete tip;
+    // Build the correct tip, applying shape/texture BMPs where available
+    BrushTip *tip = nullptr;
+    switch (tt)
+    {
+    case TipType::Airbrush:   tip = new AirbrushTip;   break;
+    case TipType::Brush:
+    case TipType::WaterColor:
+    case TipType::Marker:
+    {
+        if (m_brushEngine)
+        {
+            const QString texPath   = m_brushEngine->currentTexturePath();
+            const QString shapePath = m_brushEngine->currentShapePath();
+            if (!texPath.isEmpty())
+                { tip = new TextureTip(texPath, shapePath); break; }
         }
+        if (tt == TipType::Brush)           tip = new BrushTipWet;
+        else if (tt == TipType::WaterColor) tip = new WaterColorTip;
+        else                                tip = new MarkerTip;
+        break;
     }
+    case TipType::Chalk:      tip = new ChalkTip;      break;
+    case TipType::Eraser:
+    {
+        if (m_brushEngine)
+        {
+            const QString shapePath = m_brushEngine->currentShapePath();
+            const QString texPath   = m_brushEngine->currentTexturePath();
+            if (!shapePath.isEmpty() || !texPath.isEmpty())
+                { tip = new TextureTip(texPath, shapePath); break; }
+        }
+        tip = new EraserTip;
+        break;
+    }
+    default:
+        if (m_brushEngine)
+        {
+            const QString shapePath = m_brushEngine->currentShapePath();
+            const QString texPath   = m_brushEngine->currentTexturePath();
+            if (!shapePath.isEmpty() || !texPath.isEmpty())
+                { tip = new TextureTip(texPath, shapePath); break; }
+        }
+        tip = new PixelTip;
+        break;
+    }
+
+    // For wet tips, load shape BMP mask if one is active
+    QImage previewShapeMask;
+    if (isWetTip && m_brushEngine && !m_brushEngine->currentShapePath().isEmpty())
+        previewShapeMask = TextureTip::loadGrayscaleMaskPublic(
+            m_brushEngine->currentShapePath());
+
+    if (tip) tip->beginStroke();
+
+    DabParams dab;
+    dab.diameter        = ps.size;
+    dab.hardness        = s.hardness;
+    dab.opacity         = s.opacity;
+    dab.pressure        = 1.0f;
+    dab.color           = m_primary;
+    dab.blending        = s.blending;
+    dab.dilution        = s.dilution;
+    dab.persistence     = s.persistence;
+    dab.blurPressure    = s.blurPressure;
+    dab.coloring        = s.coloring;
+    dab.uncolorPressure = s.uncolorPressure;
+    dab.blurWidth       = s.blurWidth;
+    dab.keepOpacity     = s.keepOpacity;
+    dab.brushShape      = s.brushShape;
+    dab.textureStrength = s.textureStrength;
+    dab.shapeMask       = previewShapeMask.isNull() ? nullptr : &previewShapeMask;
+    dab.blending = 0.0f;
+    dab.dilution  = 0.0f;
+
+    const QPainter::CompositionMode compMode = (tt == TipType::Eraser)
+        ? QPainter::CompositionMode_DestinationOut
+        : QPainter::CompositionMode_SourceOver;
+
+    float x = r;
+    while (x < W - r)
+    {
+        const float wave = std::sin(x * 0.05f) * (H * 0.18f);
+        dab.center = QPointF(x, cy + wave);
+
+        // Open and close the painter each dab so wet tips can safely call
+        // constScanLine() on img between dabs (active QPainter invalidates reads).
+        QPainter p(&img);
+        p.setCompositionMode(compMode);
+        if (tip) tip->stamp(p, dab);
+        p.end();
+
+        x += spacing;
+    }
+    delete tip;
 
     m_previewLabel->setPixmap(QPixmap::fromImage(img));
 }
@@ -990,8 +1090,7 @@ void ToolbarPanel::updateDynamicSliders()
     const bool hasBlurPrs = (tt==TipType::WaterColor || tt==TipType::Marker);
     const bool isSmudge   = (tt==TipType::Smudge);
     const bool isBlur     = (tt==TipType::Blur);
-    const bool isBucket   = (tt==TipType::Bucket || tt==TipType::Gradient ||
-                              tt==TipType::SelPen || tt==TipType::SelEraser);
+    const bool isBucket   = (tt==TipType::Bucket || tt==TipType::Gradient);
     const bool hasHard    = !isBucket && !isBlur;
     const bool hasMinCtrls= !isBucket && !isBlur;
     const bool showBase   = !isBucket;
@@ -1015,9 +1114,9 @@ void ToolbarPanel::updateDynamicSliders()
 void ToolbarPanel::updateShapeButtons()
 {
     const TipType tt = m_settings.tipType;
-    const bool hasShape = (tt==TipType::Pixel || tt==TipType::Airbrush ||
-                           tt==TipType::Brush || tt==TipType::WaterColor ||
-                           tt==TipType::Marker);
+    const bool hasShape = (tt==TipType::Pixel    || tt==TipType::Airbrush ||
+                        tt==TipType::Brush    || tt==TipType::WaterColor ||
+                        tt==TipType::Marker   || tt==TipType::Eraser);
     if (m_shapeRow)   m_shapeRow->setVisible(hasShape);
     if (m_textureRow) m_textureRow->setVisible(hasShape);
 }
@@ -1151,4 +1250,95 @@ void ToolbarPanel::onExternalColorChanged(const QColor &color)
     emit colorChanged(m_primary);
     updatePreview();
     saveLastColor();
+}
+
+void ToolbarPanel::saveSettings()
+{
+    QSettings cfg("PixelCanvas", "PixelCanvas");
+    cfg.beginWriteArray("brushSlots");
+    for (int i = 0; i < kTotalSlots; ++i)
+    {
+        cfg.setArrayIndex(i);
+        const BrushSlot &sl = m_slots[i];
+        cfg.setValue("empty",    sl.empty);
+        if (sl.empty) continue;
+        cfg.setValue("name",     sl.name);
+        cfg.setValue("shapePath",   sl.shapePath);
+        cfg.setValue("texturePath", sl.texturePath);
+
+        const BrushSettings &s = sl.settings;
+        cfg.setValue("size",            s.size);
+        cfg.setValue("sizeMultiplier",  s.sizeMultiplier);
+        cfg.setValue("minSizeFraction", s.minSizeFraction);
+        cfg.setValue("opacity",         s.opacity);
+        cfg.setValue("minOpacity",      s.minOpacity);
+        cfg.setValue("hardness",        s.hardness);
+        cfg.setValue("spacing",         s.spacing);
+        cfg.setValue("smoothing",       s.smoothing);
+        cfg.setValue("blendMode",       (int)s.blendMode);
+        cfg.setValue("keepOpacity",     s.keepOpacity);
+        cfg.setValue("blending",        s.blending);
+        cfg.setValue("dilution",        s.dilution);
+        cfg.setValue("persistence",     s.persistence);
+        cfg.setValue("blurPressure",    s.blurPressure);
+        cfg.setValue("coloring",        s.coloring);
+        cfg.setValue("uncolorPressure", s.uncolorPressure);
+        cfg.setValue("blurWidth",       s.blurWidth);
+        cfg.setValue("brushShape",      s.brushShape);
+        cfg.setValue("textureStrength", s.textureStrength);
+        cfg.setValue("tipType",         (int)s.tipType);
+    }
+    cfg.endArray();
+    cfg.setValue("activeSlot", m_activeSlot);
+}
+
+void ToolbarPanel::loadSettings()
+{
+    QSettings cfg("PixelCanvas", "PixelCanvas");
+    const int n = cfg.beginReadArray("brushSlots");
+    for (int i = 0; i < n && i < kTotalSlots; ++i)
+    {
+        cfg.setArrayIndex(i);
+        const bool empty = cfg.value("empty", true).toBool();
+        // Never overwrite the built-in slots (0-9) with empty
+        if (empty && i < 10) continue;
+        if (empty) { m_slots[i] = BrushSlot{}; continue; }
+
+        BrushSlot &sl = m_slots[i];
+        sl.empty       = false;
+        sl.name        = cfg.value("name").toString();
+        sl.shapePath   = cfg.value("shapePath").toString();
+        sl.texturePath = cfg.value("texturePath").toString();
+
+        BrushSettings &s = sl.settings;
+        s.size            = cfg.value("size",            s.size).toFloat();
+        s.sizeMultiplier  = cfg.value("sizeMultiplier",  s.sizeMultiplier).toFloat();
+        s.minSizeFraction = cfg.value("minSizeFraction", s.minSizeFraction).toFloat();
+        s.opacity         = cfg.value("opacity",         s.opacity).toFloat();
+        s.minOpacity      = cfg.value("minOpacity",      s.minOpacity).toFloat();
+        s.hardness        = cfg.value("hardness",        s.hardness).toFloat();
+        s.spacing         = cfg.value("spacing",         s.spacing).toFloat();
+        s.smoothing       = cfg.value("smoothing",       s.smoothing).toFloat();
+        s.blendMode       = (BrushBlendMode)cfg.value("blendMode", (int)s.blendMode).toInt();
+        s.keepOpacity     = cfg.value("keepOpacity",     s.keepOpacity).toBool();
+        s.blending        = cfg.value("blending",        s.blending).toFloat();
+        s.dilution        = cfg.value("dilution",        s.dilution).toFloat();
+        s.persistence     = cfg.value("persistence",     s.persistence).toFloat();
+        s.blurPressure    = cfg.value("blurPressure",    s.blurPressure).toFloat();
+        s.coloring        = cfg.value("coloring",        s.coloring).toFloat();
+        s.uncolorPressure = cfg.value("uncolorPressure", s.uncolorPressure).toFloat();
+        s.blurWidth       = cfg.value("blurWidth",       s.blurWidth).toFloat();
+        s.brushShape      = cfg.value("brushShape",      s.brushShape).toInt();
+        s.textureStrength = cfg.value("textureStrength", s.textureStrength).toFloat();
+        s.tipType         = (TipType)cfg.value("tipType", (int)s.tipType).toInt();
+
+        // Built-in shapes 1 (diamond) and 2 (square) never use a BMP path
+        if (s.brushShape == 1 || s.brushShape == 2)
+            sl.shapePath = {};
+    }
+    cfg.endArray();
+
+    const int active = cfg.value("activeSlot", 0).toInt();
+    if (active >= 0 && active < kTotalSlots && !m_slots[active].empty)
+        m_activeSlot = active;
 }

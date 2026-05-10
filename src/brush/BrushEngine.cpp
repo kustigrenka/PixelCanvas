@@ -1,8 +1,10 @@
 #include "BrushEngine.h"
 
+#include <typeinfo>
 #include <QPainter>
 #include <cmath>
 #include <algorithm>
+#include <QDebug>
 
 // ─────────────────────────────────────────────────────────────────────────────
 BrushEngine::BrushEngine(QObject *parent)
@@ -158,6 +160,14 @@ void BrushEngine::applyTipType(const BrushSettings &s)
 void BrushEngine::setTipTexture(const QString &path)
 {
     m_tipTexturePath = path;
+
+    // If both paths are now empty, restore the plain tip
+    if (path.isEmpty() && m_tipShapePath.isEmpty())
+    {
+        applyTipType(m_settings);
+        return;
+    }
+
     auto *tt = dynamic_cast<TextureTip *>(m_tip);
     if (!tt)
     {
@@ -178,42 +188,58 @@ void BrushEngine::setTipShape(const QString &path)
     m_shapeScaled  = QImage();
     m_shapeScaledD = -1;
 
-    // For TextureTip (Pixel/Chalk): upgrade tip to TextureTip as before
-    const bool isDryTipType = (m_settings.tipType == TipType::Pixel   ||
-                                m_settings.tipType == TipType::Chalk   ||
-                                m_settings.tipType == TipType::Eraser  ||
-                                m_settings.tipType == TipType::SelEraser);
+    const bool isDryTipType = (m_settings.tipType == TipType::Pixel    ||
+                               m_settings.tipType == TipType::Chalk    ||
+                               m_settings.tipType == TipType::Eraser   ||
+                               m_settings.tipType == TipType::SelEraser);
+
     if (isDryTipType)
     {
-        auto *tt = dynamic_cast<TextureTip *>(m_tip);
-        if (!tt)
+        if (!path.isEmpty())
         {
-            delete m_tip;
-            m_tip = tt = new TextureTip(m_tipTexturePath, path);
-            m_compMode = QPainter::CompositionMode_SourceOver;
+            // Upgrade to TextureTip to use the BMP shape
+            auto *tt = dynamic_cast<TextureTip *>(m_tip);
+            if (!tt)
+            {
+                delete m_tip;
+                m_tip = tt = new TextureTip(m_tipTexturePath, path);
+                m_compMode = QPainter::CompositionMode_SourceOver;
+            }
+            else
+            {
+                tt->setShape(path);
+            }
         }
         else
         {
-            tt->setShape(path);
+            // Empty shape path — restore plain tip, keep texture only if non-empty
+            applyTipType(m_settings);
+            if (!m_tipTexturePath.isEmpty())
+            {
+                auto *tt = dynamic_cast<TextureTip *>(m_tip);
+                if (!tt)
+                {
+                    delete m_tip;
+                    m_tip = tt = new TextureTip(m_tipTexturePath, {});
+                    m_compMode = QPainter::CompositionMode_SourceOver;
+                }
+                else
+                {
+                    tt->setTexture(m_tipTexturePath);
+                }
+            }
         }
     }
     else
     {
-        // Wet tips keep their own tip — store shape as a mask applied in stampDab
-        if (!path.isEmpty())
-        {
-            m_shapeMask = TextureTip::loadGrayscaleMaskPublic(path);
-        }
-        else
-        {
-            m_shapeMask = QImage();
-        }
-        // If tip was previously upgraded to TextureTip, restore correct wet tip
+        // Wet tips — use shape as a mask in stampDab
+        m_shapeMask = path.isEmpty() ? QImage()
+                                     : TextureTip::loadGrayscaleMaskPublic(path);
         if (dynamic_cast<TextureTip *>(m_tip))
             applyTipType(m_settings);
     }
 
-    // Auto-spacing based on ink coverage (unchanged)
+    // Auto-spacing based on ink coverage
     if (!path.isEmpty())
     {
         float newSpacing = 0.03f;
@@ -371,14 +397,20 @@ QRect BrushEngine::endStroke()
         if (m_settings.blendMode == BrushBlendMode::Erase ||
             m_settings.tipType  == TipType::Eraser ||
             m_settings.tipType  == TipType::SelEraser)
+        {
             lp.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+            // No setOpacity — broken with DestinationOut on premultiplied images.
+            // Opacity is already baked into dab alpha via opacityAtPressure().
+        }
         else
+        {
             lp.setCompositionMode(QPainter::CompositionMode_SourceOver);
-        // Brush opacity applied once here; dabs were stamped at full alpha.
-        lp.setOpacity(static_cast<double>(m_settings.opacity));
+            lp.setOpacity(static_cast<double>(m_settings.opacity));
+        }
         lp.drawImage(0, 0, m_strokeScratch);
         m_strokeScratch = QImage();
     }
+
     m_useScratch = false;
 
     m_inStroke  = false;
@@ -430,10 +462,14 @@ QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
 {
     if (!m_layer || !m_tip || !m_painter) return {};
 
+    const bool isEraser = m_settings.tipType == TipType::Eraser ||
+                      m_settings.tipType == TipType::SelEraser ||
+                      m_settings.blendMode == BrushBlendMode::Erase;
+
     DabParams dab;
     dab.center          = pos;
     dab.diameter        = m_settings.sizeAtPressure(pressure);
-    dab.opacity         = m_useScratch ? 1.0f : m_settings.opacityAtPressure(pressure);
+    dab.opacity         = (m_useScratch && !isEraser) ? 1.0f : m_settings.opacityAtPressure(pressure);
     dab.hardness        = m_settings.hardness * (0.3f + 0.7f * pressure);
     dab.pressure        = pressure;
     dab.color           = m_color;
@@ -445,6 +481,7 @@ QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
     dab.uncolorPressure = m_settings.uncolorPressure;
     dab.blurWidth       = m_settings.blurWidth   * (0.2f + 0.8f * pressure);
     dab.keepOpacity     = m_settings.keepOpacity;
+    dab.brushShape      = m_settings.brushShape;
     dab.textureStrength = m_settings.textureStrength;
     dab.shapeMask       = m_shapeMask.isNull() ? nullptr : &m_shapeMask;
 
@@ -465,11 +502,15 @@ QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
         break;
     }
 
-    if (m_useScratch && compMode != QPainter::CompositionMode_DestinationOut)
+    if (m_useScratch)
         m_painter->setCompositionMode(QPainter::CompositionMode_SourceOver);
     else
         m_painter->setCompositionMode(compMode);
 
+    qDebug() << "brushShape=" << dab.brushShape
+             << "tipType=" << (int)m_settings.tipType
+             << "tip=" << typeid(*m_tip).name();
+        
     m_tip->stamp(*m_painter, dab);
 
     const int pad = static_cast<int>(std::ceil(dab.diameter * 0.5f)) + 2;

@@ -501,10 +501,11 @@ bool MainWindow::maybeSave()
     return false;
 }
 
-void MainWindow::closeEvent(QCloseEvent *e)
+void MainWindow::closeEvent(QCloseEvent *event)
 {
-    if (maybeSave()) e->accept();
-    else             e->ignore();
+    if (!maybeSave()) { event->ignore(); return; }
+    if (m_toolbar) m_toolbar->saveSettings();
+    event->accept();
 }
 
 void MainWindow::onUndoSliderMoved(int value)
