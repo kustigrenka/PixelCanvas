@@ -46,6 +46,8 @@ private slots:
     void onSave();
     void onSaveAs();
     void onExportFlat();
+    
+    void onImportPng(); 
 
     // Edit
     void onUndo();
@@ -78,6 +80,8 @@ private:
     void buildStatusBar();
     void connectSignals();
     void applyShortcuts();
+
+    void importPng(const QString &path);   // ← add this
 
     // Dock-content builders    (MainWindowDocks.cpp)
     QWidget *buildNavigatorWidget();
