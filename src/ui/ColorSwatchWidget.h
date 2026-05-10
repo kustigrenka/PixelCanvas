@@ -30,6 +30,8 @@ public:
     void setSwatches(QVector<QColor> sw) { m_swatches = std::move(sw); update(); }
 
     QSize sizeHint()        const override;
+    void  saveSwatches();
+    void  loadSwatches();
     QSize minimumSizeHint() const override { return sizeHint(); }
 
 public slots:
@@ -60,6 +62,7 @@ private:
     int   swatchAt(QPoint p) const;
     void  showContextMenu(int idx, const QPoint &globalPos);
     void  recomputeCols();
+
 
     QColor          m_color  = Qt::black;
     QVector<QColor> m_swatches;

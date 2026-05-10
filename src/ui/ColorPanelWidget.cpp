@@ -13,7 +13,6 @@
 #include <QDockWidget>
 #include <QScrollArea>
 #include <QSettings>
-
 // ─────────────────────────────────────────────────────────────────────────────
 // AccordionSection
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,7 +172,35 @@ ColorPanelWidget::ColorPanelWidget(QWidget *parent)
     swatchScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     swatchScroll->setFrameShape(QFrame::NoFrame);
     swatchScroll->setFixedHeight(5 * (22 + 2) + 2 * 4);  // 5 visible rows
-    lay->addWidget(new AccordionSection(tr("  ▦  Swatches"), swatchScroll, false, this));
+
+    // Quick-add button: adds current color to first empty swatch slot
+    auto *swatchContainer = new QWidget(this);
+    auto *scLay = new QVBoxLayout(swatchContainer);
+    scLay->setContentsMargins(0,0,0,0);
+    scLay->setSpacing(2);
+    auto *addBtn = new QToolButton(swatchContainer);
+    addBtn->setText("+ Add Color");
+    addBtn->setToolTip("Add current color to first empty swatch slot");
+    addBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    addBtn->setFixedHeight(20);
+    addBtn->setStyleSheet(
+        "QToolButton { background:#2a2a2a; color:#aaa; border:none; font-size:10px; }"
+        "QToolButton:hover { background:#3a3a3a; color:#fff; }");
+    connect(addBtn, &QToolButton::clicked, this, [this]() {
+        QVector<QColor> sw = m_swatches->swatches();
+        for (int i = 0; i < sw.size(); ++i) {
+            if (!sw[i].isValid()) {
+                sw[i] = color();
+                m_swatches->setSwatches(sw);
+                m_swatches->saveSwatches();
+                return;
+            }
+        }
+    });
+    scLay->addWidget(swatchScroll);
+    scLay->addWidget(addBtn);
+
+    lay->addWidget(new AccordionSection(tr("  ▦  Swatches"), swatchContainer, false, this));
     lay->addWidget(new AccordionSection(tr("  ✏  Scratch Pad"), m_scratch,  false, this));
     lay->addStretch(1);
 

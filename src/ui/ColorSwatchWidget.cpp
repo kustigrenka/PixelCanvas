@@ -6,6 +6,9 @@
 #include <QMenu>
 #include <QAction>
 #include <QHelpEvent>
+#include <QSettings>
+#include <QMimeData>
+#include <QDrag>
 #include <algorithm>
 
 ColorSwatchWidget::ColorSwatchWidget(QWidget *parent)
@@ -13,8 +16,10 @@ ColorSwatchWidget::ColorSwatchWidget(QWidget *parent)
 {
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     setMouseTracking(true);
+    setAcceptDrops(true);
     m_swatches.resize(kCount);
     recomputeCols();
+    loadSwatches();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,7 +112,16 @@ void ColorSwatchWidget::mousePressEvent(QMouseEvent *e)
 
     if (e->button() == Qt::LeftButton) {
         const QColor &c = m_swatches.value(idx);
-        if (c.isValid()) { m_color = c; emit colorChanged(c); update(); }
+        if (c.isValid()) {
+            m_color = c;
+            emit colorChanged(c);
+            update();
+        } else {
+            // Empty slot — left click saves current color
+            m_swatches[idx] = m_color;
+            saveSwatches();
+            update();
+        }
     } else if (e->button() == Qt::RightButton) {
         showContextMenu(idx, e->globalPosition().toPoint());
     }
@@ -123,9 +137,53 @@ void ColorSwatchWidget::showContextMenu(int idx, const QPoint &globalPos)
     auto *clearAct = menu.addAction(tr("Clear Slot"));
     clearAct->setEnabled(m_swatches.value(idx).isValid());
 
+    menu.addSeparator();
+    auto *clearAllAct = menu.addAction(tr("Clear All Swatches"));
+
     const QAction *chosen = menu.exec(globalPos);
-    if (chosen == saveAct)       { m_swatches[idx] = m_color;  update(); }
-    else if (chosen == clearAct) { m_swatches[idx] = QColor(); update(); }
+    if (chosen == saveAct) {
+        m_swatches[idx] = m_color;
+        saveSwatches();
+        update();
+    } else if (chosen == clearAct) {
+        m_swatches[idx] = QColor();
+        saveSwatches();
+        update();
+    } else if (chosen == clearAllAct) {
+        m_swatches.fill(QColor());
+        saveSwatches();
+        update();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Persistence
+// ─────────────────────────────────────────────────────────────────────────────
+void ColorSwatchWidget::saveSwatches()
+{
+    QSettings s("PixelCanvas", "PixelCanvas");
+    s.beginWriteArray("swatches", kCount);
+    for (int i = 0; i < kCount; ++i) {
+        s.setArrayIndex(i);
+        s.setValue("color", m_swatches.value(i).isValid()
+                   ? m_swatches.value(i).name(QColor::HexArgb)
+                   : QString());
+    }
+    s.endArray();
+    s.sync();
+}
+
+void ColorSwatchWidget::loadSwatches()
+{
+    QSettings s("PixelCanvas", "PixelCanvas");
+    const int n = s.beginReadArray("swatches");
+    for (int i = 0; i < std::min(n, kCount); ++i) {
+        s.setArrayIndex(i);
+        const QString val = s.value("color").toString();
+        m_swatches[i] = val.isEmpty() ? QColor() : QColor(val);
+    }
+    s.endArray();
+    update();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -140,7 +198,7 @@ bool ColorSwatchWidget::event(QEvent *e)
             const QColor &c = m_swatches.value(idx);
             QToolTip::showText(he->globalPos(),
                 c.isValid() ? c.name().toUpper()
-                            : tr("Empty — right-click to save"));
+                            : tr("Empty — click to save current color, right-click for options"));
             return true;
         }
     }
