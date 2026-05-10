@@ -84,11 +84,16 @@ void MainWindow::buildMenuBar()
     auto *file = menuBar()->addMenu(tr("&File"));
     file->addAction(tr("&New"),          this, &MainWindow::onNewCanvas,   QKeySequence::New);
     file->addAction(tr("&Open…"),        this, &MainWindow::onOpen,        QKeySequence::Open);
+    file->addAction(tr("&Import Image…"), this, &MainWindow::onImportPng,
+                    QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
     file->addSeparator();
     file->addAction(tr("&Save"),         this, &MainWindow::onSave,        QKeySequence::Save);
     file->addAction(tr("Save &As…"),     this, &MainWindow::onSaveAs,      QKeySequence::SaveAs);
     file->addAction(tr("&Export Flat…"), this, &MainWindow::onExportFlat,
                     QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+    file->addAction(tr("&Import Image…"), this, &MainWindow::onImportPng,
+                    QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
+                    
     file->addSeparator();
     file->addAction(tr("&Quit"), this, &QWidget::close, QKeySequence::Quit);
 
@@ -389,21 +394,28 @@ void MainWindow::onRedo()
 // ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::onOpen()
 {
-    if (!maybeSave()) return; 
     const QString path = QFileDialog::getOpenFileName(
-        this, tr("Open Project"), {}, tr("PixelCanvas Projects (*.paint)"));
+        this, tr("Open"), {},
+        tr("All Supported (*.paint *.png *.jpg *.jpeg);;"
+           "PixelCanvas Projects (*.paint);;"
+           "Images (*.png *.jpg *.jpeg)"));
     if (path.isEmpty()) return;
-    if (!m_projectIO->loadProject(path)) {
-        QMessageBox::warning(this, tr("Open Failed"),
-                             tr("Could not open project file."));
-        return;
-    }
-    m_currentFile = path;
-    m_canvas->reinitCanvas();
-    m_canvas->forceRecomposite();
-    setWindowTitle(tr("PixelCanvas — %1").arg(QFileInfo(path).fileName()));
-}
 
+    const QString ext = QFileInfo(path).suffix().toLower();
+    if (ext == QLatin1String("paint")) {
+        if (!m_projectIO->loadProject(path)) {
+            QMessageBox::warning(this, tr("Open Failed"),
+                                 tr("Could not open project file."));
+            return;
+        }
+        m_currentFile = path;
+        m_canvas->reinitCanvas();
+        m_canvas->forceRecomposite();
+        setWindowTitle(tr("PixelCanvas — %1").arg(QFileInfo(path).fileName()));
+    } else {
+        importPng(path);   // PNG / JPEG path
+    }
+}
 void MainWindow::onSave()
 {
     if (m_currentFile.isEmpty()) { onSaveAs(); return; }
@@ -438,6 +450,44 @@ void MainWindow::onExportFlat()
         !path.endsWith(QLatin1String(".jpeg"), Qt::CaseInsensitive))
         path += QStringLiteral(".png");
     m_projectIO->exportFlat(path);
+}
+
+void MainWindow::importPng(const QString &path)
+{
+    QImage img(path);
+    if (img.isNull()) {
+        QMessageBox::warning(this, tr("Import Failed"),
+                             tr("Could not read image file."));
+        return;
+    }
+
+    // Convert to the internal format
+    if (img.format() != QImage::Format_ARGB32_Premultiplied)
+        img = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+
+    // Re-initialise the layer stack at the image's size
+    m_layerStack->init(img.size());
+
+    // Put the image into the background layer (index 0)
+    Layer *bg = m_layerStack->layerAt(0);
+    bg->pixels = img;
+    bg->name   = QFileInfo(path).baseName();
+
+    // Reinit the canvas to match the new size, then repaint
+    m_canvas->reinitCanvas();
+    m_canvas->forceRecomposite();
+
+    m_currentFile.clear();   // it's an import, not a .paint project
+    setWindowTitle(tr("PixelCanvas — %1 [imported]")
+                   .arg(QFileInfo(path).fileName()));
+}
+
+void MainWindow::onImportPng()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Import Image"), {},
+        tr("Images (*.png *.jpg *.jpeg *.bmp *.tiff)"));
+    if (!path.isEmpty()) importPng(path);
 }
 
 bool MainWindow::maybeSave()
