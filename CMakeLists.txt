@@ -42,6 +42,11 @@ add_executable(PixelCanvas
     src/ui/MannequinWindow.cpp
 )
 
+qt_add_resources(PixelCanvas "resources"
+    PREFIX "/"
+    FILES resources/app.png
+)
+
 target_include_directories(PixelCanvas PRIVATE
     src
     src/canvas
