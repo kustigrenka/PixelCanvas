@@ -39,6 +39,7 @@
 #include "ColorPanelWidget.h"
 #include "PinterestWindow.h"
 #include "MannequinWindow.h"
+#include "../GoogleDrive/GoogleDriveClient.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -96,7 +97,11 @@ void MainWindow::buildMenuBar()
                     
     file->addSeparator();
     file->addAction(tr("&Quit"), this, &QWidget::close, QKeySequence::Quit);
-
+    file->addSeparator();
+    m_driveAction = file->addAction(tr("☁  Save to Google Drive"),
+                                this, &MainWindow::onUploadToDrive);
+    
+                                
     // ── Edit ──────────────────────────────────────────────────────────────────
     auto *edit = menuBar()->addMenu(tr("&Edit"));
     m_undoAction = edit->addAction(tr("&Undo"), this, &MainWindow::onUndo, QKeySequence::Undo);
@@ -289,12 +294,20 @@ void MainWindow::connectSignals()
 
     connect(m_undoStack, &UndoStack::undoAvailable, m_undoAction, &QAction::setEnabled);
     connect(m_undoStack, &UndoStack::redoAvailable, m_redoAction, &QAction::setEnabled);
-
     connect(m_undoStack, &UndoStack::historyChanged, this, [this]() {
         const QSignalBlocker b(m_undoSlider);
         m_undoSlider->setRange(0, qMax(0, m_undoStack->historySize() - 1));
         m_undoSlider->setValue(m_undoStack->currentIndex());
     });
+
+    // ── Google Drive ──────────────────────────────────────────────────────────
+    m_driveClient = new GoogleDriveClient(this);
+    connect(m_driveClient, &GoogleDriveClient::authenticated,
+        this, &MainWindow::onGDriveAuthenticated);
+    connect(m_driveClient, &GoogleDriveClient::authFailed,
+        this, &MainWindow::onGDriveAuthFailed);
+    connect(m_driveClient, &GoogleDriveClient::uploadFinished,
+        this, &MainWindow::onGDriveUploadFinished);
 
     connect(m_layerStack, &LayerStack::layerPropertiesChanged,
             m_canvas, &CanvasWidget::forceRecomposite);
@@ -527,4 +540,53 @@ void MainWindow::onUndoSliderMoved(int value)
         l->pixels = final.pixels;
     m_layerStack->setActiveLayer(final.layerIndex);
     m_canvas->forceRecomposite();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Google Drive
+// ─────────────────────────────────────────────────────────────────────────────
+void MainWindow::onUploadToDrive()
+{
+    // If there's no saved file yet, do a local save first
+    if (m_currentFile.isEmpty()) {
+        onSaveAs();
+        if (m_currentFile.isEmpty()) return; // user cancelled
+    }
+    m_driveClient->uploadFile(m_currentFile);
+}
+
+void MainWindow::onGDriveAuthenticated()
+{
+    statusBar()->showMessage(tr("Google Drive: authenticated ✓"), 3000);
+}
+
+void MainWindow::onGDriveAuthFailed(const QString &msg)
+{
+    // Device flow sends a special "DEVICE_CODE:code:url" message
+    if (msg.startsWith("DEVICE_CODE:")) {
+        const QStringList parts = msg.split(':');
+        // parts[1] = user code, parts[2]+ = url
+        const QString userCode = parts.value(1);
+        QMessageBox::information(this, tr("Google Drive Login"),
+            tr("A browser window has opened.\n\n"
+               "Enter this code when prompted:\n\n"
+               "    %1\n\n"
+               "Then return here — the upload will continue automatically.")
+            .arg(userCode));
+    } else {
+        QMessageBox::warning(this, tr("Google Drive"),
+                             tr("Authentication failed: %1").arg(msg));
+    }
+}
+
+void MainWindow::onGDriveUploadFinished(bool ok, const QString &fileName)
+{
+    if (ok)
+        statusBar()->showMessage(
+            tr("Uploaded \"%1\" to Google Drive").arg(fileName), 5000);
+    else
+        QMessageBox::warning(this, tr("Google Drive"),
+                             tr("Upload failed for \"%1\".\n"
+                                "Check your internet connection and try again.")
+                             .arg(fileName));
 }

@@ -23,7 +23,7 @@ class ColorWheelWidget;
 class ColorPanelWidget;
 class PinterestWindow;
 class MannequinWindow;
-
+class GoogleDriveClient;
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -46,8 +46,12 @@ private slots:
     void onSave();
     void onSaveAs();
     void onExportFlat();
-    
+
     void onImportPng(); 
+    void onUploadToDrive();
+    void onGDriveAuthenticated();
+    void onGDriveAuthFailed(const QString &msg);
+    void onGDriveUploadFinished(bool ok, const QString &fileName);
 
     // Edit
     void onUndo();
@@ -97,6 +101,7 @@ private:
     BrushEngine   *m_brushEngine  = nullptr;
     ProjectIO     *m_projectIO    = nullptr;
     UndoStack     *m_undoStack    = nullptr;
+    GoogleDriveClient *m_driveClient = nullptr;
 
     // ── Widgets ───────────────────────────────────────────────────────────────
     CanvasWidget  *m_canvas       = nullptr;
@@ -124,6 +129,7 @@ private:
     // ── Edit actions ──────────────────────────────────────────────────────────
     QAction       *m_undoAction   = nullptr;
     QAction       *m_redoAction   = nullptr;
+    QAction *m_driveAction = nullptr;
 
     // ── Status bar labels ─────────────────────────────────────────────────────
     QLabel        *m_statusTool     = nullptr;
