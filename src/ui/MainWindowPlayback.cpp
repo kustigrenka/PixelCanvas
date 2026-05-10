@@ -12,6 +12,14 @@ void MainWindow::onToggleRecording()
         m_recordAction->setText(tr("⏺  Start Recording"));
         m_recordAction->setChecked(false);
         m_playAction->setEnabled(m_canvas->recorder().hasRecording());
+
+        const int eventCount = m_canvas->recorder().events().size();
+        if (eventCount > 0) {
+            QMessageBox::information(this, tr("Recording Stopped"),
+                tr("Recording stopped — %1 events captured.\n\n"
+                   "Go to Playback → Play Recording to watch and export it.")
+                .arg(eventCount));
+        }
     } else {
         m_canvas->startRecording();
         m_recordAction->setText(tr("⏹  Stop Recording"));
@@ -24,7 +32,9 @@ void MainWindow::onPlayback()
 {
     if (!m_canvas->recorder().hasRecording()) {
         QMessageBox::information(this, tr("No Recording"),
-            tr("Record a drawing session first using Playback → Start Recording."));
+            tr("Record a drawing session first using Playback → Start Recording.\n\n"
+               "Draw something while recording, then stop — you can then play it back "
+               "and export as PNG frames or MP4 video."));
         return;
     }
 
