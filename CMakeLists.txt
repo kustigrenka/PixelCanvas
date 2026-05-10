@@ -9,11 +9,11 @@ find_package(Qt6 OPTIONAL_COMPONENTS WebEngineWidgets)
 find_package(OpenCV REQUIRED)
 find_package(X11)
 find_package(ZLIB REQUIRED)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGLWidgets Network)
 
 add_executable(PixelCanvas
-# ── Entry point ───────────────────────────────────────────────────────────
     src/main.cpp
-# ── Core ──────────────────────────────────────────────────────────────────
+
     src/canvas/CanvasWidget.cpp
     src/brush/BrushEngine.cpp
     src/brush/BrushTip.cpp
@@ -21,13 +21,12 @@ add_executable(PixelCanvas
     src/layers/UndoStack.cpp
     src/filters/FilterImpls.cpp
     src/io/ProjectIO.cpp
-# ── UI ────────────────────────────────────────────────────────────────────
+
     src/ui/MainWindow.cpp
     src/ui/MainWindowDocks.cpp
     src/ui/MainWindowFilters.cpp
     src/ui/MainWindowCanvas.cpp
     src/ui/MainWindowPlayback.cpp
-    src/ui/PlaybackWindow.h
     src/ui/PlaybackWindow.cpp
     src/ui/ToolbarPanel.cpp
     src/ui/LayerPanel.cpp
@@ -36,10 +35,10 @@ add_executable(PixelCanvas
     src/ui/ColorSwatchWidget.cpp
     src/ui/ColorPanelWidget.cpp
     src/ui/ScratchPadWidget.cpp
-    src/ui/PinterestWindow.h
     src/ui/PinterestWindow.cpp
-    src/ui/MannequinWindow.h
     src/ui/MannequinWindow.cpp
+
+    src/GoogleDrive/GoogleDriveClient.cpp
 )
 
 target_include_directories(PixelCanvas PRIVATE
@@ -60,6 +59,7 @@ target_link_libraries(PixelCanvas PRIVATE
     ${OpenCV_LIBS}
     $<$<BOOL:${X11_Xi_FOUND}>:X11::Xi>
     ZLIB::ZLIB
+    Qt6::Network
 )
 
 if(Qt6WebEngineWidgets_FOUND)
