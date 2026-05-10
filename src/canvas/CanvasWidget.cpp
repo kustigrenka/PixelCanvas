@@ -235,26 +235,58 @@ void CanvasWidget::doBucketFill(const QPointF &canvasPos)
     if (!layer) return;
 
     QImage &img = layer->pixels;
+    const int W  = img.width();
+    const int H  = img.height();
     const int x0 = static_cast<int>(canvasPos.x());
     const int y0 = static_cast<int>(canvasPos.y());
-    if (!img.rect().contains(x0, y0)) return;
+    if (x0 < 0 || y0 < 0 || x0 >= W || y0 >= H) return;
 
-    const QRgb target = img.pixel(x0, y0);
-    const QRgb fill   = m_brushEngine->color().rgba();
+    // Read target color directly from scanline (fast, no lock per call)
+    const QRgb target = reinterpret_cast<const QRgb*>(img.constScanLine(y0))[x0];
+    const QRgb fill   = qPremultiply(m_brushEngine->color().rgba());
     if (target == fill) return;
 
+    // Scanline flood fill — processes whole horizontal spans at once,
+    // far fewer stack operations than pixel-by-pixel.
     QStack<QPoint> stack;
     stack.push({x0, y0});
+
     while (!stack.isEmpty())
     {
         const QPoint pt = stack.pop();
-        if (!img.rect().contains(pt)) continue;
-        if (img.pixel(pt) != target)  continue;
-        img.setPixel(pt, fill);
-        stack.push({pt.x() + 1, pt.y()});
-        stack.push({pt.x() - 1, pt.y()});
-        stack.push({pt.x(),     pt.y() + 1});
-        stack.push({pt.x(),     pt.y() - 1});
+        int y = pt.y();
+        if (y < 0 || y >= H) continue;
+
+        QRgb *row = reinterpret_cast<QRgb*>(img.scanLine(y));
+
+        // Walk left from seed
+        int left = pt.x();
+        while (left > 0 && row[left - 1] == target) --left;
+
+        // Walk right from seed
+        int right = pt.x();
+        while (right < W - 1 && row[right + 1] == target) ++right;
+
+        // Fill the span
+        for (int x = left; x <= right; ++x)
+            row[x] = fill;
+
+        // Check spans above and below
+        auto checkRow = [&](int ny) {
+            if (ny < 0 || ny >= H) return;
+            const QRgb *nrow = reinterpret_cast<const QRgb*>(img.constScanLine(ny));
+            bool inSpan = false;
+            for (int x = left; x <= right; ++x) {
+                if (nrow[x] == target && !inSpan) {
+                    stack.push({x, ny});
+                    inSpan = true;
+                } else if (nrow[x] != target) {
+                    inSpan = false;
+                }
+            }
+        };
+        checkRow(y - 1);
+        checkRow(y + 1);
     }
     recompositeRect(img.rect());
 }
@@ -303,10 +335,15 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
         m_brushEngine->setActiveLayer(&m_selectionMask);
         m_drawing = true;
         m_brushEngine->beginStroke();
+        if (m_recordingEnabled)
+            m_recorder.recordBegin(m_brushEngine->settings(),
+                                   m_brushEngine->color(),
+                                   m_layerStack->activeIndex());
         StrokeSample s;
         s.pos = widgetToCanvas(widgetPos); s.pressure = pressure;
         s.tiltX = tiltX; s.tiltY = tiltY; s.rotation = rotation;
         const QRect dirty = m_brushEngine->addSample(s);
+        if (m_recordingEnabled) m_recorder.recordSample(s);
         if (!dirty.isEmpty()) {
             m_pendingDirty = m_pendingDirty.isEmpty() ? dirty : m_pendingDirty.united(dirty);
             if (!m_repaintTimer->isActive()) m_repaintTimer->start();
@@ -315,27 +352,30 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
         return;
     }
 
-    // Normal brush path — set layer BEFORE beginStroke so painter opens correctly
+    // Normal brush path
     if (m_undoStack)
         m_undoStack->pushSnapshot(m_layerStack->activeIndex(),
                                   m_layerStack->activeLayer()->pixels);
+    m_dirty = true;
 
     if (Layer *l = m_layerStack->activeLayer())
         m_brushEngine->setActiveLayer(&l->pixels);
 
     m_drawing = true;
     m_brushEngine->beginStroke();
+    if (m_recordingEnabled)
+        m_recorder.recordBegin(m_brushEngine->settings(),
+                               m_brushEngine->color(),
+                               m_layerStack->activeIndex());
 
     StrokeSample s;
     s.pos = widgetToCanvas(widgetPos); s.pressure = pressure;
     s.tiltX = tiltX; s.tiltY = tiltY; s.rotation = rotation;
 
     const QRect dirty = m_brushEngine->addSample(s);
+    if (m_recordingEnabled) m_recorder.recordSample(s);
     if (!dirty.isEmpty())
-    {
-        // First dab: recomposite immediately so the click is visible right away
         recompositeRect(dirty);
-    }
 
     emit cursorMoved(s.pos, pressure);
 }
@@ -357,9 +397,9 @@ void CanvasWidget::pointerUpdate(const QPointF &widgetPos, float pressure,
     s.tiltX = tiltX; s.tiltY = tiltY; s.rotation = rotation;
 
     const QRect dirty = m_brushEngine->addSample(s);
+    if (m_recordingEnabled) m_recorder.recordSample(s);
     if (!dirty.isEmpty())
     {
-        // Accumulate dirty rect and let the timer batch the recomposite
         m_pendingDirty = m_pendingDirty.isEmpty() ? dirty : m_pendingDirty.united(dirty);
         if (!m_repaintTimer->isActive())
             m_repaintTimer->start();
@@ -373,7 +413,6 @@ void CanvasWidget::pointerEnd()
     if (m_panning) { m_panning = false; return; }
     if (m_drawing)
     {
-        // Flush any remaining accumulated dirty rect before ending stroke
         m_repaintTimer->stop();
         flushPendingDirty();
 
@@ -398,12 +437,16 @@ void CanvasWidget::pointerEnd()
         }
         else
         {
+            if (m_recordingEnabled) m_recorder.recordEnd();
             const QRect dirty = m_brushEngine->endStroke();
             if (!dirty.isEmpty())
                 recompositeRect(dirty);
+            // Push post-stroke snapshot so undo slider can reach the latest state
+            if (m_undoStack && m_layerStack->activeLayer())
+                m_undoStack->pushSnapshot(m_layerStack->activeIndex(),
+                                          m_layerStack->activeLayer()->pixels);
         }
 
-        // Restore layer pointer if it was redirected to the selection mask
         if (tt == TipType::SelPen || tt == TipType::SelEraser)
         {
             if (Layer *l = m_layerStack->activeLayer())
@@ -600,6 +643,7 @@ void CanvasWidget::applyFilter(Filter *filter)
         m_undoStack->pushSnapshot(m_layerStack->activeIndex(),
                                   m_layerStack->activeLayer()->pixels);
     m_layerStack->applyFilterToActive(filter);
+    m_dirty = true;
     recompositeRect(m_composited.rect());
 }
 
@@ -615,6 +659,8 @@ void CanvasWidget::reinitCanvas()
     m_composited.fill(Qt::white);
     if (Layer *l = m_layerStack->activeLayer())
         m_brushEngine->setActiveLayer(&l->pixels);
+    if (m_undoStack) m_undoStack->clear();
+    m_dirty = false;
     recompositeRect(m_composited.rect());
     resetView();
 }

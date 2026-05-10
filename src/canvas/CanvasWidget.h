@@ -8,6 +8,7 @@
 #include <QTimer>
 
 #include "Stroke.h"
+#include "StrokeRecorder.h"
 
 class LayerStack;
 class BrushEngine;
@@ -41,6 +42,9 @@ public:
 
     const QImage &compositedImage() const { return m_composited; }
 
+    bool isDirty() const { return m_dirty; }
+    void clearDirty()    { m_dirty = false; }
+
 protected:
     void initializeGL()  override;
     void resizeGL(int w, int h) override;
@@ -65,6 +69,7 @@ signals:
     void colorPicked(const QColor &color);
 
 private:
+    bool m_dirty = false;
     QPointF widgetToCanvas(const QPointF &wp) const;
     void recompositeRect(const QRect &dirty);
     void flushPendingDirty();          // called by m_repaintTimer
@@ -115,4 +120,12 @@ private:
     QPointF m_gradientStart;
     QImage  m_selectionMask;        // Grayscale8, same size as canvas
     bool    m_hasSelection = false;
+
+    StrokeRecorder m_recorder;
+    bool           m_recordingEnabled = false;
+    public:
+    void startRecording() { m_recorder.startRecording(); m_recordingEnabled = true; }
+    void stopRecording()  { m_recorder.stopRecording();  m_recordingEnabled = false; }
+    bool isRecording() const { return m_recordingEnabled; }
+    const StrokeRecorder& recorder() const { return m_recorder; }
 };

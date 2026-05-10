@@ -16,6 +16,7 @@ class Filter;
 class QToolBar;
 class QComboBox;
 class QSpinBox;
+class QSlider;  
 class QDockWidget;
 class QAction;
 class ColorWheelWidget;
@@ -61,6 +62,10 @@ private slots:
     void onResetZoom();
     void onFlipH();
     void onStabilizerChanged(int level);
+
+    void onToggleRecording();
+    void onPlayback();
+    void onUndoSliderMoved(int value);
     
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -78,6 +83,10 @@ private:
     QWidget *buildNavigatorWidget();
     QWidget *buildColorWidget();
     QWidget *buildBrushWidget();
+
+    // ── Speedpaint / Playback ─────────────────────────────────────────────────
+    QAction *m_recordAction  = nullptr;
+    QAction *m_playAction    = nullptr;
 
     // ── Core objects ──────────────────────────────────────────────────────────
     LayerStack    *m_layerStack   = nullptr;
@@ -106,6 +115,7 @@ private:
     QToolBar      *m_quickBar     = nullptr;
     QSpinBox      *m_zoomSpin     = nullptr;
     QComboBox     *m_stabCombo    = nullptr;
+    QSlider *m_undoSlider = nullptr;
 
     // ── Edit actions ──────────────────────────────────────────────────────────
     QAction       *m_undoAction   = nullptr;
@@ -118,4 +128,6 @@ private:
     QLabel        *m_statusZoom     = nullptr;
 
     QString        m_currentFile;
+
+    bool maybeSave();
 };

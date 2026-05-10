@@ -173,22 +173,47 @@ void BrushEngine::setTipTexture(const QString &path)
 
 void BrushEngine::setTipShape(const QString &path)
 {
+    if (path == m_tipShapePath) return;
     m_tipShapePath = path;
-    auto *tt = dynamic_cast<TextureTip *>(m_tip);
-    if (!tt)
+    m_shapeScaled  = QImage();
+    m_shapeScaledD = -1;
+
+    // For TextureTip (Pixel/Chalk): upgrade tip to TextureTip as before
+    const bool isDryTipType = (m_settings.tipType == TipType::Pixel   ||
+                                m_settings.tipType == TipType::Chalk   ||
+                                m_settings.tipType == TipType::Eraser  ||
+                                m_settings.tipType == TipType::SelEraser);
+    if (isDryTipType)
     {
-        delete m_tip;
-        m_tip = tt = new TextureTip(m_tipTexturePath, path);
-        m_compMode = QPainter::CompositionMode_SourceOver;
+        auto *tt = dynamic_cast<TextureTip *>(m_tip);
+        if (!tt)
+        {
+            delete m_tip;
+            m_tip = tt = new TextureTip(m_tipTexturePath, path);
+            m_compMode = QPainter::CompositionMode_SourceOver;
+        }
+        else
+        {
+            tt->setShape(path);
+        }
     }
     else
     {
-        tt->setShape(path);
+        // Wet tips keep their own tip — store shape as a mask applied in stampDab
+        if (!path.isEmpty())
+        {
+            m_shapeMask = TextureTip::loadGrayscaleMaskPublic(path);
+        }
+        else
+        {
+            m_shapeMask = QImage();
+        }
+        // If tip was previously upgraded to TextureTip, restore correct wet tip
+        if (dynamic_cast<TextureTip *>(m_tip))
+            applyTipType(m_settings);
     }
 
-    // Auto-set spacing based on BMP ink coverage so dabs always fill in.
-    // Sparse BMPs (bristle, streak) need very tight spacing so marks from
-    // adjacent dabs overlap and cover the gaps between them.
+    // Auto-spacing based on ink coverage (unchanged)
     if (!path.isEmpty())
     {
         float newSpacing = 0.03f;
@@ -203,9 +228,6 @@ void BrushEngine::setTipShape(const QString &path)
                     if (row[x] < 128) ++ink;
             }
             const float cov = total > 0 ? float(ink) / float(total) : 0.f;
-            // < 5%  coverage (bristle, arrow): step every ~1% of diameter
-            // 5-15% coverage (chalk, streak):  step every ~2%
-            // > 15% coverage (soft dab, block): step every ~3%
             if      (cov < 0.05f) newSpacing = 0.01f;
             else if (cov < 0.15f) newSpacing = 0.02f;
             else                  newSpacing = 0.03f;
@@ -216,7 +238,6 @@ void BrushEngine::setTipShape(const QString &path)
     }
     else
     {
-        // BMP removed — restore normal spacing
         m_settings.spacing = 0.08f;
         if (m_activePreset >= 0 && m_activePreset < m_presets.size())
             m_presets[m_activePreset].settings.spacing = 0.08f;
@@ -412,28 +433,20 @@ QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
     DabParams dab;
     dab.center          = pos;
     dab.diameter        = m_settings.sizeAtPressure(pressure);
-    // When drawing onto scratch: stamp at full opacity so dabs never
-    // accumulate past 1.0 within a stroke. The user's opacity setting is
-    // applied once as a global alpha when scratch is merged onto the layer.
-    // For wet media (direct to layer): use the real pressure-mapped opacity.
     dab.opacity         = m_useScratch ? 1.0f : m_settings.opacityAtPressure(pressure);
-    // Hardness: light touch → soft edges, hard press → full crispness
     dab.hardness        = m_settings.hardness * (0.3f + 0.7f * pressure);
     dab.pressure        = pressure;
     dab.color           = m_color;
-    // Blending: light touch picks up more canvas colour (wet feel); hard press = pure pigment
     dab.blending        = m_settings.blending    * (1.0f - pressure);
-    // Dilution: light touch = more watery; hard press = opaque
     dab.dilution        = m_settings.dilution    * (1.0f - pressure);
-    // Persistence: hard press holds the picked-up colour longer
     dab.persistence     = m_settings.persistence * (0.3f + 0.7f * pressure);
     dab.blurPressure    = m_settings.blurPressure;
-    // Coloring (Smudge): more colour injection at higher pressure
     dab.coloring        = m_settings.coloring    * pressure;
     dab.uncolorPressure = m_settings.uncolorPressure;
-    // Blur width: harder press spreads blur wider
     dab.blurWidth       = m_settings.blurWidth   * (0.2f + 0.8f * pressure);
     dab.keepOpacity     = m_settings.keepOpacity;
+    dab.textureStrength = m_settings.textureStrength;
+    dab.shapeMask       = m_shapeMask.isNull() ? nullptr : &m_shapeMask;
 
     QPainter::CompositionMode compMode = m_compMode;
     switch (m_settings.blendMode)
@@ -452,15 +465,11 @@ QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
         break;
     }
 
-    // For scratch-layer dabs: use SourceOver so overlapping dabs fill in naturally.
-    // BMP shape marks are binary (alpha 0 or 1) so SourceOver doesn't accumulate
-    // past 1.0 — successive dabs simply reveal more of the shape in new positions.
-    // The soft-circle clip creates mild edge gradients, but with tight spacing these
-    // are invisible. DestinationOut is preserved for eraser tips.
     if (m_useScratch && compMode != QPainter::CompositionMode_DestinationOut)
         m_painter->setCompositionMode(QPainter::CompositionMode_SourceOver);
     else
         m_painter->setCompositionMode(compMode);
+
     m_tip->stamp(*m_painter, dab);
 
     const int pad = static_cast<int>(std::ceil(dab.diameter * 0.5f)) + 2;
@@ -468,5 +477,4 @@ QRect BrushEngine::stampDab(const QPointF &pos, float pressure)
                  static_cast<int>(pos.y()) - pad,
                  2 * pad, 2 * pad);
 }
-
 

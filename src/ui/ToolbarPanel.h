@@ -79,7 +79,7 @@ private slots:
     void onUncolorPressureChanged(int v);
     void onBlurWidthChanged(int v);
     void onBlendModeChanged(int index);
-    void onShapeChanged(int shape);   // 0=Circle 1=Diamond 2=Square
+    void onShapeChanged(int shape) {};  // 0=Circle 1=Diamond 2=Square
 
 private:
     // ── Build helpers ─────────────────────────────────────────────────────────

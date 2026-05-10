@@ -28,6 +28,8 @@ struct DabParams
     float    blurWidth       = 0.5f;
     bool     keepOpacity     = false;
     int      brushShape      = 0;   // 0=Circle  1=Diamond  2=Square
+    float    textureStrength = 1.0f; // 0=invisible, 1=full strength
+    const QImage *shapeMask = nullptr;  // optional shape BMP, applied by tip
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,17 +73,27 @@ public:
 private:
     QColor m_sample;
     bool   m_hasSample = false;
+    mutable QImage m_maskCache;
+    mutable int    m_lastD = -1;
+    mutable float  m_lastH = -1.f;
+    mutable QImage m_shapeCache;
+    mutable int    m_shapeD = -1;
 };
 
 class WaterColorTip : public BrushTip
 {
 public:
-    void beginStroke() override { m_hasSample = false; }
+    void beginStroke() override { m_hasSample = false; m_dabCount = 0; }
     void stamp(QPainter &p, const DabParams &dab) override;
 private:
     QColor m_sample;
     bool   m_hasSample = false;
+    int    m_dabCount  = 0;
+    mutable QImage m_maskCache;
+    mutable int    m_lastD = -1;
     static QImage boxBlur(const QImage &src, int radius);
+    mutable QImage m_shapeCache;
+    mutable int    m_shapeD = -1;
 };
 
 class MarkerTip : public BrushTip
@@ -92,8 +104,11 @@ public:
 private:
     QColor m_sample;
     bool   m_hasSample = false;
+    mutable QImage m_maskCache;
+    mutable int    m_lastD = -1;
+    mutable QImage m_shapeCache;
+    mutable int    m_shapeD = -1;
 };
-
 class SmudgeTip : public BrushTip
 {
 public:
@@ -102,6 +117,8 @@ public:
 private:
     QImage m_sample;
     bool   m_hasSample = false;
+    mutable QImage m_maskCache;
+    mutable int    m_lastD = -1;
 };
 
 class BlurTip : public BrushTip
@@ -134,11 +151,16 @@ public:
     void setTexture(const QString &path);
     void setShape(const QString &path);
 
+    static QImage loadGrayscaleMaskPublic(const QString &path)
+    {
+        return loadGrayscaleMask(path, 128);
+    }
+
     void stamp(QPainter &p, const DabParams &dab) override;
 
 private:
-    QImage m_shape;    // Grayscale8
-    QImage m_texture;  // Grayscale8
+    QImage m_shape;
+    QImage m_texture;
 
     static QImage loadGrayscaleMask(const QString &path, int targetSize);
 };

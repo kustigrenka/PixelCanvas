@@ -115,7 +115,12 @@ private:
     QPointF m_lastRaw;
     QPointF m_lastSmoothed;
 
+    QImage m_shapeScaled;
+    int    m_shapeScaledD = -1;
+
     int     m_crCount = 0;   // sample counter, reset each stroke
 
     QPainter::CompositionMode m_compMode = QPainter::CompositionMode_SourceOver;
+
+    QImage m_shapeMask;
 };

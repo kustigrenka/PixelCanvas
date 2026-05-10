@@ -26,6 +26,9 @@ add_executable(PixelCanvas
     src/ui/MainWindowDocks.cpp
     src/ui/MainWindowFilters.cpp
     src/ui/MainWindowCanvas.cpp
+    src/ui/MainWindowPlayback.cpp
+    src/ui/PlaybackWindow.h
+    src/ui/PlaybackWindow.cpp
     src/ui/ToolbarPanel.cpp
     src/ui/LayerPanel.cpp
     src/ui/ColorWheelWidget.cpp
@@ -62,7 +65,6 @@ target_link_libraries(PixelCanvas PRIVATE
 if(Qt6WebEngineWidgets_FOUND)
     target_compile_definitions(PixelCanvas PRIVATE QT_WEBENGINEWIDGETS_LIB)
     target_link_libraries(PixelCanvas PRIVATE Qt6::WebEngineWidgets)
-    # Tell Qt where to find QtWebEngineProcess at runtime
     target_compile_definitions(PixelCanvas PRIVATE
         QTWEBENGINEPROCESS_PATH="/usr/lib/qt6/libexec/QtWebEngineProcess")
     message(STATUS "Qt WebEngine found — Pinterest embedded browser enabled")

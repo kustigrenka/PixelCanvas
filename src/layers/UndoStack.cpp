@@ -6,42 +6,47 @@ UndoStack::UndoStack(QObject *parent)
 
 void UndoStack::pushSnapshot(int layerIndex, const QImage &pixels)
 {
-    if (m_undoStack.size() >= kMaxSteps)
-        m_undoStack.removeFirst();
+    // Discard redo history ahead of cursor
+    if (m_cursor < m_snapshots.size() - 1)
+        m_snapshots.resize(m_cursor + 1);
 
-    m_undoStack.push({ layerIndex, pixels.copy() });
-    m_redoStack.clear();
+    // Enforce cap — keep one extra slot for the "before" state
+    if (m_snapshots.size() >= kMaxSteps)
+        m_snapshots.removeFirst();
 
-    emit undoAvailable(true);
+    m_snapshots.append({ layerIndex, pixels.copy() });
+    m_cursor = m_snapshots.size() - 1;
+
+    emit undoAvailable(canUndo());
     emit redoAvailable(false);
+    emit historyChanged();
 }
 
-// Save current state to redo stack, restore and return the undo snapshot.
-Snapshot UndoStack::undo(int currentLayerIndex, const QImage &currentPixels)
+Snapshot UndoStack::undo()
 {
     Q_ASSERT(canUndo());
-    m_redoStack.push({ currentLayerIndex, currentPixels.copy() });
-    Snapshot snap = m_undoStack.pop();
+    --m_cursor;
     emit undoAvailable(canUndo());
     emit redoAvailable(true);
-    return snap;
+    emit historyChanged();
+    return m_snapshots[m_cursor];
 }
 
-// Save current state to undo stack, restore and return the redo snapshot.
-Snapshot UndoStack::redo(int currentLayerIndex, const QImage &currentPixels)
+Snapshot UndoStack::redo()
 {
     Q_ASSERT(canRedo());
-    m_undoStack.push({ currentLayerIndex, currentPixels.copy() });
-    Snapshot snap = m_redoStack.pop();
+    ++m_cursor;
     emit undoAvailable(true);
     emit redoAvailable(canRedo());
-    return snap;
+    emit historyChanged();
+    return m_snapshots[m_cursor];
 }
 
 void UndoStack::clear()
 {
-    m_undoStack.clear();
-    m_redoStack.clear();
+    m_snapshots.clear();
+    m_cursor = -1;
     emit undoAvailable(false);
     emit redoAvailable(false);
+    emit historyChanged();
 }

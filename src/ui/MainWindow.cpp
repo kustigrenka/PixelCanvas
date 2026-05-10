@@ -24,6 +24,7 @@
 #include <QMessageBox>
 #include <QApplication>
 #include <QSettings>
+#include <QCloseEvent>
 
 
 #include "CanvasWidget.h"
@@ -175,6 +176,19 @@ void MainWindow::buildMenuBar()
     // ── Window (dock toggles added later in buildDocks) ────────────────────
     menuBar()->addMenu(tr("&Window"));
 
+    // playback
+
+    QMenu *playbackMenu = menuBar()->addMenu(tr("&Playback"));
+    m_recordAction = playbackMenu->addAction(tr("⏺  Start Recording"));
+    m_recordAction->setCheckable(true);
+    m_recordAction->setShortcut(QKeySequence(tr("Ctrl+Shift+R")));
+    connect(m_recordAction, &QAction::triggered, this, &MainWindow::onToggleRecording);
+
+    m_playAction = playbackMenu->addAction(tr("▶  Play Recording"));
+    m_playAction->setShortcut(QKeySequence(tr("Ctrl+Shift+P")));
+    m_playAction->setEnabled(false);
+    connect(m_playAction, &QAction::triggered, this, &MainWindow::onPlayback);
+
     // ── Help ──────────────────────────────────────────────────────────────────
     menuBar()->addMenu(tr("&Help"));
 }
@@ -192,6 +206,20 @@ void MainWindow::buildQuickBar()
     m_quickBar->addAction(tr("↩ Undo"), this, &MainWindow::onUndo);
     m_quickBar->addAction(tr("↪ Redo"), this, &MainWindow::onRedo);
     m_quickBar->addSeparator();
+    m_quickBar->addSeparator();
+
+    auto *histLabel = new QLabel(tr(" History:"), this);
+    m_quickBar->addWidget(histLabel);
+
+    m_undoSlider = new QSlider(Qt::Horizontal, this);
+    m_undoSlider->setFixedWidth(120);
+    m_undoSlider->setRange(0, 0);
+    m_undoSlider->setValue(0);
+    m_undoSlider->setToolTip(tr("Drag to scrub through undo history"));
+    m_quickBar->addWidget(m_undoSlider);
+
+    connect(m_undoSlider, &QSlider::valueChanged,
+            this, &MainWindow::onUndoSliderMoved);
 
     m_quickBar->addAction(tr("⇄ Flip H"), this, &MainWindow::onFlipH);
     m_quickBar->addSeparator();
@@ -256,6 +284,12 @@ void MainWindow::connectSignals()
 
     connect(m_undoStack, &UndoStack::undoAvailable, m_undoAction, &QAction::setEnabled);
     connect(m_undoStack, &UndoStack::redoAvailable, m_redoAction, &QAction::setEnabled);
+
+    connect(m_undoStack, &UndoStack::historyChanged, this, [this]() {
+        const QSignalBlocker b(m_undoSlider);
+        m_undoSlider->setRange(0, qMax(0, m_undoStack->historySize() - 1));
+        m_undoSlider->setValue(m_undoStack->currentIndex());
+    });
 
     connect(m_layerStack, &LayerStack::layerPropertiesChanged,
             m_canvas, &CanvasWidget::forceRecomposite);
@@ -333,22 +367,20 @@ void MainWindow::onStabilizerChanged(int level)
 void MainWindow::onUndo()
 {
     if (!m_undoStack->canUndo()) return;
-    const int snapLayer = m_undoStack->peekUndoLayerIndex();
-    Layer *l = m_layerStack->layerAt(snapLayer);
-    if (!l) return;
-    Snapshot s = m_undoStack->undo(snapLayer, l->pixels);
-    m_layerStack->layerAt(s.layerIndex)->pixels = s.pixels;
+    const Snapshot s = m_undoStack->undo();
+    if (Layer *l = m_layerStack->layerAt(s.layerIndex))
+        l->pixels = s.pixels;
+    m_layerStack->setActiveLayer(s.layerIndex);
     m_canvas->forceRecomposite();
 }
 
 void MainWindow::onRedo()
 {
     if (!m_undoStack->canRedo()) return;
-    const int snapLayer = m_undoStack->peekRedoLayerIndex();
-    Layer *l = m_layerStack->layerAt(snapLayer);
-    if (!l) return;
-    Snapshot s = m_undoStack->redo(snapLayer, l->pixels);
-    m_layerStack->layerAt(s.layerIndex)->pixels = s.pixels;
+    const Snapshot s = m_undoStack->redo();
+    if (Layer *l = m_layerStack->layerAt(s.layerIndex))
+        l->pixels = s.pixels;
+    m_layerStack->setActiveLayer(s.layerIndex);
     m_canvas->forceRecomposite();
 }
 
@@ -357,6 +389,7 @@ void MainWindow::onRedo()
 // ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::onOpen()
 {
+    if (!maybeSave()) return; 
     const QString path = QFileDialog::getOpenFileName(
         this, tr("Open Project"), {}, tr("PixelCanvas Projects (*.paint)"));
     if (path.isEmpty()) return;
@@ -407,10 +440,40 @@ void MainWindow::onExportFlat()
     m_projectIO->exportFlat(path);
 }
 
-void MainWindow::closeEvent(QCloseEvent *event)
+bool MainWindow::maybeSave()
 {
-    QSettings s("YourOrg", "YourApp");
-    s.setValue("window/geometry", saveGeometry());
-    s.setValue("window/state",    saveState());
-    QMainWindow::closeEvent(event);
+    if (!m_canvas->isDirty()) return true;
+    const auto btn = QMessageBox::question(this, tr("Unsaved Changes"),
+        tr("The canvas has unsaved changes. Save before continuing?"),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    if (btn == QMessageBox::Save)    { onSave(); return true; }
+    if (btn == QMessageBox::Discard) { return true; }
+    return false;
+}
+
+void MainWindow::closeEvent(QCloseEvent *e)
+{
+    if (maybeSave()) e->accept();
+    else             e->ignore();
+}
+
+void MainWindow::onUndoSliderMoved(int value)
+{
+    if (m_undoStack->historySize() == 0) return;
+    if (value == m_undoStack->currentIndex()) return;
+
+    const int current = m_undoStack->currentIndex();
+    if (value < current) {
+        for (int i = current; i > value && m_undoStack->canUndo(); --i)
+            m_undoStack->undo();
+    } else {
+        for (int i = current; i < value && m_undoStack->canRedo(); ++i)
+            m_undoStack->redo();
+    }
+
+    const Snapshot final = m_undoStack->snapshotAt(m_undoStack->currentIndex());
+    if (Layer *l = m_layerStack->layerAt(final.layerIndex))
+        l->pixels = final.pixels;
+    m_layerStack->setActiveLayer(final.layerIndex);
+    m_canvas->forceRecomposite();
 }

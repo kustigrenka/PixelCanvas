@@ -342,12 +342,11 @@ void ToolbarPanel::buildBrushBody()
 
     root->addWidget(makeSep(m_brushBody));
 
-    //  3. Shape panel — selector + BMP import in one group 
+    //  3. Shape panel — one unified list: built-ins + imported BMPs
     m_shapeRow = new QWidget(m_brushBody);
     auto *shapeGroupLayout = new QVBoxLayout(m_shapeRow);
     shapeGroupLayout->setContentsMargins(0,0,0,0); shapeGroupLayout->setSpacing(3);
 
-    // Row A: Shape dropdown (Circle / Diamond / Square)
     auto *shapeTopRow = new QWidget(m_shapeRow);
     auto *shapeLayout = new QHBoxLayout(shapeTopRow);
     shapeLayout->setContentsMargins(0,0,0,0); shapeLayout->setSpacing(4);
@@ -357,62 +356,33 @@ void ToolbarPanel::buildBrushBody()
     shapeLbl->setFixedWidth(80);
     shapeLayout->addWidget(shapeLbl);
 
-    auto *shapeCombo = new QComboBox(shapeTopRow);
-    shapeCombo->addItems({tr("Circle"), tr("Diamond"), tr("Square")});
-    shapeCombo->setCurrentIndex(0);
-    shapeCombo->setStyleSheet(
-        "QComboBox{background:#2d2d2d;border:1px solid #555;color:#ccc;"
-        "border-radius:2px;padding:1px 4px;font-size:11px;}"
-        "QComboBox::drop-down{border:none;}"
-        "QComboBox QAbstractItemView{background:#2d2d2d;color:#ccc;selection-background-color:#4a6fa5;}");
-    connect(shapeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &ToolbarPanel::onShapeChanged);
-    shapeLayout->addWidget(shapeCombo, 1);
-    shapeGroupLayout->addWidget(shapeTopRow);
-
-    // Row B: Shape BMP import (replaces circle with bitmap mask)
-    auto *shapeBmpRow = new QWidget(m_shapeRow);
-    auto *shapeBmpLayout = new QHBoxLayout(shapeBmpRow);
-    shapeBmpLayout->setContentsMargins(0,0,0,0); shapeBmpLayout->setSpacing(4);
-
-    auto *shapeBmpLbl = new QLabel(tr("Shape BMP"), shapeBmpRow);
-    shapeBmpLbl->setStyleSheet("color:#ccc; font-size:11px;");
-    shapeBmpLbl->setFixedWidth(80);
-    shapeBmpLayout->addWidget(shapeBmpLbl);
-
-    auto *shapeImportCombo = new QComboBox(shapeBmpRow);
-    shapeImportCombo->addItem(tr("Default (circle)"));
-    shapeImportCombo->setStyleSheet(
+    const QString shapeComboStyle =
         "QComboBox{background:#2d2d2d;border:1px solid #555;color:#ccc;"
         "border-radius:2px;padding:1px 4px;font-size:11px;}"
         "QComboBox::drop-down{border:none;}"
         "QComboBox QAbstractItemView{background:#2d2d2d;color:#ccc;"
-        "selection-background-color:#4a6fa5;}");
+        "selection-background-color:#4a6fa5;}";
+
+    // Unified combo: indices 0-2 are built-ins (no path), 3+ are imported BMPs
+    auto *shapeCombo = new QComboBox(shapeTopRow);
+    shapeCombo->addItem(tr("Circle"),  QVariant());   // index 0
+    shapeCombo->addItem(tr("Diamond"), QVariant());   // index 1
+    shapeCombo->addItem(tr("Square"),  QVariant());   // index 2
+    shapeCombo->setStyleSheet(shapeComboStyle);
 
     const QString shapeDir = QStandardPaths::writableLocation(
         QStandardPaths::AppLocalDataLocation) + "/brush_shapes/";
     QDir(shapeDir).mkpath(".");
     for (const QString &f : QDir(shapeDir).entryList({"*.bmp","*.png"}, QDir::Files))
-        shapeImportCombo->addItem(QFileInfo(f).baseName(), shapeDir + f);
+        shapeCombo->addItem(QFileInfo(f).baseName(), shapeDir + f);
 
-    connect(shapeImportCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this, shapeImportCombo](int idx) {
-        const QString path = shapeImportCombo->itemData(idx).toString();
-        if (m_brushEngine) m_brushEngine->setTipShape(path);
-        // Sync m_settings.spacing to the auto-adjusted value in BrushEngine
-        if (m_brushEngine)
-            m_settings.spacing = m_brushEngine->settings().spacing;
-        saveUIIntoSlot(m_activeSlot);
-        updatePreview();
-        emitSettings();
-    });
-    shapeBmpLayout->addWidget(shapeImportCombo, 1);
+    shapeLayout->addWidget(shapeCombo, 1);
 
     // Import button
-    auto *importShapeBtn = new QToolButton(shapeBmpRow);
+    auto *importShapeBtn = new QToolButton(shapeTopRow);
     importShapeBtn->setText("…");
     importShapeBtn->setToolTip(tr("Import brush shape BMP/PNG"));
-    connect(importShapeBtn, &QToolButton::clicked, this, [this, shapeImportCombo] {
+    connect(importShapeBtn, &QToolButton::clicked, this, [this, shapeCombo] {
         const QString src = QFileDialog::getOpenFileName(
             nullptr, tr("Import Brush Shape"), {},
             tr("Images (*.bmp *.png)"));
@@ -420,45 +390,87 @@ void ToolbarPanel::buildBrushBody()
         const QString dest = QStandardPaths::writableLocation(
             QStandardPaths::AppLocalDataLocation)
             + "/brush_shapes/" + QFileInfo(src).fileName();
+        // Dedup: check if already in combo
+        for (int i = 3; i < shapeCombo->count(); ++i) {
+            if (shapeCombo->itemData(i).toString() == dest) {
+                shapeCombo->setCurrentIndex(i);
+                return;
+            }
+        }
+        if (QFile::exists(dest)) QFile::remove(dest);
         QFile::copy(src, dest);
-        shapeImportCombo->addItem(QFileInfo(src).baseName(), dest);
-        shapeImportCombo->setCurrentIndex(shapeImportCombo->count() - 1);
+        shapeCombo->addItem(QFileInfo(src).baseName(), dest);
+        shapeCombo->setCurrentIndex(shapeCombo->count() - 1);
     });
-    shapeBmpLayout->addWidget(importShapeBtn);
+    shapeLayout->addWidget(importShapeBtn);
 
-    // Delete button — removes the selected custom shape file and combo entry
-    auto *deleteShapeBtn = new QToolButton(shapeBmpRow);
+    // Delete button — disabled for built-in entries (index 0-2)
+    auto *deleteShapeBtn = new QToolButton(shapeTopRow);
     deleteShapeBtn->setText("✕");
     deleteShapeBtn->setToolTip(tr("Delete selected shape"));
     deleteShapeBtn->setFixedWidth(22);
+    deleteShapeBtn->setEnabled(false);
     deleteShapeBtn->setStyleSheet(
         "QToolButton{background:#5a2020;border:1px solid #844;color:#fcc;"
         "border-radius:2px;font-size:10px;}"
-        "QToolButton:hover{background:#7a2020;}");
-    connect(deleteShapeBtn, &QToolButton::clicked, this, [this, shapeImportCombo] {
-        const int idx = shapeImportCombo->currentIndex();
-        if (idx <= 0) return;   // index 0 = "Default (circle)", not deletable
-        const QString path = shapeImportCombo->itemData(idx).toString();
+        "QToolButton:hover{background:#7a2020;}"
+        "QToolButton:disabled{background:#333;color:#666;border-color:#444;}");
+    connect(deleteShapeBtn, &QToolButton::clicked, this, [this, shapeCombo] {
+        const int idx = shapeCombo->currentIndex();
+        if (idx < 3) return;   // built-ins are undeletable
+        const QString path = shapeCombo->itemData(idx).toString();
         if (!path.isEmpty()) QFile::remove(path);
-        shapeImportCombo->removeItem(idx);
-        // Reset to default circle
-        shapeImportCombo->setCurrentIndex(0);
+        shapeCombo->removeItem(idx);
+        shapeCombo->setCurrentIndex(0);   // back to Circle
         if (m_brushEngine) m_brushEngine->setTipShape({});
+        m_settings.brushShape = 0;
+        saveUIIntoSlot(m_activeSlot);
+        emitSettings();
     });
-    shapeBmpLayout->addWidget(deleteShapeBtn);
+    shapeLayout->addWidget(deleteShapeBtn);
 
-    shapeGroupLayout->addWidget(shapeBmpRow);
+    // Enable/disable delete button based on selection
+    connect(shapeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this, shapeCombo, deleteShapeBtn](int idx) {
+        deleteShapeBtn->setEnabled(idx >= 3);
+
+        if (idx < 3) {
+            // Built-in: set brushShape and clear any BMP path
+            m_settings.brushShape = idx;
+            if (m_brushEngine) m_brushEngine->setTipShape({});
+        } else {
+            // Imported BMP: clear brushShape, load the file
+            m_settings.brushShape = 0;
+            const QString path = shapeCombo->itemData(idx).toString();
+            if (m_brushEngine) {
+                m_brushEngine->setTipShape(path);
+                m_settings.spacing = m_brushEngine->settings().spacing;
+            }
+        }
+        m_activeShape = idx;
+        saveUIIntoSlot(m_activeSlot);
+        updatePreview();
+        emitSettings();
+    });
+
+    shapeGroupLayout->addWidget(shapeTopRow);
     root->addWidget(m_shapeRow);
 
-    // Store combo pointer for loadSlotIntoUI
-    m_shapeRow->setProperty("shapeCombo", QVariant::fromValue(static_cast<QObject*>(shapeCombo)));
+    // Store the unified combo pointer for loadSlotIntoUI
+    m_shapeRow->setProperty("shapeCombo",    QVariant::fromValue(static_cast<QObject*>(shapeCombo)));
+    m_shapeRow->setProperty("shapeBmpCombo", QVariant::fromValue(static_cast<QObject*>(shapeCombo)));
 
-    //  4. Texture import row 
+    //  4. Texture import row
     m_textureRow = new QWidget(m_brushBody);
-    auto *texLayout = new QHBoxLayout(m_textureRow);
+    auto *texGroupLayout = new QVBoxLayout(m_textureRow);
+    texGroupLayout->setContentsMargins(0,0,0,0); texGroupLayout->setSpacing(3);
+
+    // Row A: combo + import + delete
+    auto *texTopRow = new QWidget(m_textureRow);
+    auto *texLayout = new QHBoxLayout(texTopRow);
     texLayout->setContentsMargins(0,0,0,0); texLayout->setSpacing(4);
 
-    auto *texLbl = new QLabel(tr("Texture"), m_textureRow);
+    auto *texLbl = new QLabel(tr("Texture"), texTopRow);
     texLbl->setStyleSheet("color:#ccc; font-size:11px;");
     texLbl->setFixedWidth(80);
     texLayout->addWidget(texLbl);
@@ -470,8 +482,8 @@ void ToolbarPanel::buildBrushBody()
         "QComboBox QAbstractItemView{background:#2d2d2d;color:#ccc;"
         "selection-background-color:#4a6fa5;}";
 
-    auto *texCombo = new QComboBox(m_textureRow);
-    texCombo->addItem(tr("None"));
+    auto *texCombo = new QComboBox(texTopRow);
+    texCombo->addItem(tr("None"));   // index 0, no data
     texCombo->setStyleSheet(comboStyle);
 
     const QString texDir = QStandardPaths::writableLocation(
@@ -480,15 +492,10 @@ void ToolbarPanel::buildBrushBody()
     for (const QString &f : QDir(texDir).entryList({"*.bmp","*.png"}, QDir::Files))
         texCombo->addItem(QFileInfo(f).baseName(), texDir + f);
 
-    connect(texCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this, texCombo](int idx) {
-        const QString path = texCombo->itemData(idx).toString();
-        if (m_brushEngine) m_brushEngine->setTipTexture(path);
-        updatePreview();
-    });
     texLayout->addWidget(texCombo, 1);
 
-    auto *importTexBtn = new QToolButton(m_textureRow);
+    // Import button
+    auto *importTexBtn = new QToolButton(texTopRow);
     importTexBtn->setText("…");
     importTexBtn->setToolTip(tr("Import texture BMP/PNG"));
     connect(importTexBtn, &QToolButton::clicked, this, [this, texCombo] {
@@ -499,11 +506,87 @@ void ToolbarPanel::buildBrushBody()
         const QString dest = QStandardPaths::writableLocation(
             QStandardPaths::AppLocalDataLocation)
             + "/brush_textures/" + QFileInfo(src).fileName();
+        // Dedup by stored path
+        for (int i = 1; i < texCombo->count(); ++i) {
+            if (texCombo->itemData(i).toString() == dest) {
+                if (texCombo->currentIndex() == i) {
+                    if (m_brushEngine) m_brushEngine->setTipTexture(dest);
+                    updatePreview();
+                } else {
+                    texCombo->setCurrentIndex(i);
+                }
+                return;
+            }
+        }
+        if (QFile::exists(dest)) QFile::remove(dest);
         QFile::copy(src, dest);
         texCombo->addItem(QFileInfo(src).baseName(), dest);
         texCombo->setCurrentIndex(texCombo->count() - 1);
     });
     texLayout->addWidget(importTexBtn);
+
+    // Delete button — disabled when "None" is selected
+    auto *deleteTexBtn = new QToolButton(texTopRow);
+    deleteTexBtn->setText("✕");
+    deleteTexBtn->setToolTip(tr("Delete selected texture"));
+    deleteTexBtn->setFixedWidth(22);
+    deleteTexBtn->setEnabled(false);
+    deleteTexBtn->setStyleSheet(
+        "QToolButton{background:#5a2020;border:1px solid #844;color:#fcc;"
+        "border-radius:2px;font-size:10px;}"
+        "QToolButton:hover{background:#7a2020;}"
+        "QToolButton:disabled{background:#333;color:#666;border-color:#444;}");
+    connect(deleteTexBtn, &QToolButton::clicked, this, [this, texCombo] {
+        const int idx = texCombo->currentIndex();
+        if (idx <= 0) return;
+        const QString path = texCombo->itemData(idx).toString();
+        if (!path.isEmpty()) QFile::remove(path);
+        texCombo->removeItem(idx);
+        texCombo->setCurrentIndex(0);   // back to None
+        if (m_brushEngine) m_brushEngine->setTipTexture({});
+        updatePreview();
+    });
+    texLayout->addWidget(deleteTexBtn);
+    texGroupLayout->addWidget(texTopRow);
+
+    // Row B: texture strength slider (0-100 → 0.0-1.0)
+    auto *texStrRow = new QWidget(m_textureRow);
+    auto *texStrLayout = new QHBoxLayout(texStrRow);
+    texStrLayout->setContentsMargins(0,0,0,0); texStrLayout->setSpacing(4);
+    auto *texStrLbl = new QLabel(tr("Strength"), texStrRow);
+    texStrLbl->setStyleSheet("color:#ccc; font-size:11px;");
+    texStrLbl->setFixedWidth(80);
+    texStrLayout->addWidget(texStrLbl);
+    auto *texStrSlider = new QSlider(Qt::Horizontal, texStrRow);
+    texStrSlider->setRange(0, 100);
+    texStrSlider->setValue(100);
+    auto *texStrSpin = new QSpinBox(texStrRow);
+    texStrSpin->setRange(0, 100);
+    texStrSpin->setValue(100);
+    texStrSpin->setFixedWidth(46);
+    QObject::connect(texStrSlider, &QSlider::valueChanged, texStrSpin,  &QSpinBox::setValue);
+    QObject::connect(texStrSpin,  QOverload<int>::of(&QSpinBox::valueChanged), texStrSlider, &QSlider::setValue);
+    QObject::connect(texStrSlider, &QSlider::valueChanged, this, [this](int v) {
+        m_settings.textureStrength = v / 100.0f;
+        saveUIIntoSlot(m_activeSlot);
+        updatePreview();
+        emitSettings();
+    });
+    texStrLayout->addWidget(texStrSlider, 1);
+    texStrLayout->addWidget(texStrSpin);
+    texGroupLayout->addWidget(texStrRow);
+    texStrRow->setVisible(false);   // hidden until a texture is selected
+
+    // Wire combo: enable/disable delete, show/hide strength row, notify engine
+    connect(texCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this, texCombo, deleteTexBtn, texStrRow](int idx) {
+        deleteTexBtn->setEnabled(idx > 0);
+        texStrRow->setVisible(idx > 0);
+        const QString path = texCombo->itemData(idx).toString();
+        if (m_brushEngine) m_brushEngine->setTipTexture(path);
+        updatePreview();
+    });
+
     root->addWidget(m_textureRow);
 
     root->addWidget(makeSep(m_brushBody));
@@ -772,16 +855,21 @@ void ToolbarPanel::loadSlotIntoUI(int index)
             if (modes[i] == s.blendMode) { m_blendCombo->setCurrentIndex(i); break; }
     }
 
-    // Shape combo
+    // Unified shape combo: indices 0-2 = built-ins, 3+ = imported BMPs.
+    // When loading a slot just restore to the stored brushShape (0-2).
+    // Custom BMP shapes are per-stroke state, not persisted per-slot.
     if (m_shapeRow) {
         auto *shapeCombo = qobject_cast<QComboBox*>(
             qvariant_cast<QObject*>(m_shapeRow->property("shapeCombo")));
         if (shapeCombo) {
             const QSignalBlocker b(shapeCombo);
-            shapeCombo->setCurrentIndex(
-                (s.brushShape >= 0 && s.brushShape < shapeCombo->count()) ? s.brushShape : 0);
+            const int idx = (s.brushShape >= 0 && s.brushShape <= 2) ? s.brushShape : 0;
+            shapeCombo->setCurrentIndex(idx);
         }
     }
+    // Clear any BMP shape so the slot starts clean
+    if (m_brushEngine) m_brushEngine->setTipShape({});
+
     m_activeShape = s.brushShape;
 
     if (m_nameLbl) m_nameLbl->setText(m_slots[index].name);
@@ -874,6 +962,7 @@ void ToolbarPanel::updatePreview()
             dab.blurWidth       = s.blurWidth;
             dab.keepOpacity     = s.keepOpacity;
             dab.brushShape      = s.brushShape;
+            dab.textureStrength = s.textureStrength;
 
             float x = r;
             while (x < W - r) {
@@ -1022,14 +1111,6 @@ void ToolbarPanel::onUncolorPressureChanged(int v)
 void ToolbarPanel::onBlurWidthChanged(int v)
 { m_settings.blurWidth=v/100.0f; saveUIIntoSlot(m_activeSlot); updatePreview(); emitSettings(); }
 
-void ToolbarPanel::onShapeChanged(int shape)
-{
-    m_activeShape = shape;
-    m_settings.brushShape = shape;
-    saveUIIntoSlot(m_activeSlot);
-    updatePreview();
-    emitSettings();
-}
 
 void ToolbarPanel::onBlendModeChanged(int index)
 {

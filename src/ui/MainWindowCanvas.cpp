@@ -24,6 +24,8 @@
 // ── New canvas ────────────────────────────────────────────────────────────────
 void MainWindow::onNewCanvas()
 {
+    if (!maybeSave()) return;
+
     QDialog dlg(this);
     dlg.setWindowTitle(tr("New Canvas"));
     dlg.setFixedWidth(300);

@@ -39,6 +39,8 @@ struct BrushSettings
 
     int   brushShape = 0;   // 0=Circle  1=Diamond  2=Square
 
+    float textureStrength = 1.0f;  // 0=invisible, 1=full strength
+
     TipType tipType = TipType::Pixel;
 
     float effectiveDiameter() const { return size * sizeMultiplier; }
@@ -77,6 +79,7 @@ struct BrushSettings
     static constexpr const char* kKeyUncolorPressure = "uncolorPressure";
     static constexpr const char* kKeyBlurWidth       = "blurWidth";
     static constexpr const char* kKeyBrushShape      = "brushShape";
+    static constexpr const char* kKeyTextureStrength = "textureStrength";
     static constexpr const char* kKeyTipType         = "tipType";
 };
 

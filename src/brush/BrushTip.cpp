@@ -28,7 +28,9 @@ QImage makeSoftCircleMask(int d, float r, float hardness,
         {
             const float dx   = x - cx;
             const float dy   = y - cy;
-            const float dist = std::sqrt(dx * dx + dy * dy);
+            const float dist2 = dx * dx + dy * dy;
+            if (dist2 >= r * r) continue;   // early reject without sqrt
+            const float dist = std::sqrt(dist2);  // only computed for pixels inside the circle
             if (dist >= r) continue;
 
             float alpha = 1.0f;
@@ -64,7 +66,9 @@ QImage makeAlphaMask(int d, float r, float hardness)
         {
             const float dx   = x - cx;
             const float dy   = y - cy;
-            const float dist = std::sqrt(dx * dx + dy * dy);
+            const float dist2 = dx * dx + dy * dy;
+            if (dist2 >= r * r) continue;   // early reject without sqrt
+            const float dist = std::sqrt(dist2);  // only computed for pixels inside the circle
             if (dist >= r) continue;
 
             float alpha = 1.0f;
@@ -191,27 +195,23 @@ void BrushTipWet::stamp(QPainter &p, const DabParams &dab)
 {
     if (dab.diameter < 0.5f) return;
 
-    // ── 1. Sample canvas colour under dab centre ───────────────────────────
     const QImage *canvas = static_cast<const QImage *>(p.device());
     const int cx = static_cast<int>(dab.center.x());
     const int cy = static_cast<int>(dab.center.y());
     QColor canvasSample = Qt::transparent;
     if (canvas && cx >= 0 && cy >= 0 && cx < canvas->width() && cy < canvas->height())
     {
-        // Fast direct scanline read — avoids format-conversion overhead of pixelColor()
         const QRgb px = reinterpret_cast<const QRgb *>(canvas->constScanLine(cy))[cx];
         canvasSample = QColor(qUnpremultiply(px));
     }
 
-    // ── 2. Update stored sample (persistence) ─────────────────────────────
     if (!m_hasSample)
     {
-        m_sample   = canvasSample;
+        m_sample    = canvasSample;
         m_hasSample = true;
     }
     else
     {
-        // Lerp stored sample toward current canvas sample, speed = 1-persistence
         const float refresh = 1.0f - dab.persistence;
         m_sample = QColor(
             static_cast<int>(m_sample.red()   + refresh * (canvasSample.red()   - m_sample.red())),
@@ -221,7 +221,6 @@ void BrushTipWet::stamp(QPainter &p, const DabParams &dab)
         );
     }
 
-    // ── 3. Mix FG colour with canvas sample (blending) ────────────────────
     const float b = dab.blending;
     QColor paintColor(
         static_cast<int>(dab.color.red()   * (1.0f - b) + m_sample.red()   * b),
@@ -229,15 +228,44 @@ void BrushTipWet::stamp(QPainter &p, const DabParams &dab)
         static_cast<int>(dab.color.blue()  * (1.0f - b) + m_sample.blue()  * b)
     );
 
-    // ── 4. Dilution reduces effective opacity ─────────────────────────────
     const float effOpacity = dab.opacity * (1.0f - dab.dilution);
-
-    // ── 5. Paint mask ──────────────────────────────────────────────────────
-    const float r  = dab.diameter * 0.5f;
-    const int   d  = static_cast<int>(std::ceil(dab.diameter)) + 2;
+    const float r   = dab.diameter * 0.5f;
+    const int   d   = static_cast<int>(std::ceil(dab.diameter)) + 2;
     const int baseA = static_cast<int>(effOpacity * 255.0f);
 
-    const QImage mask = makeSoftCircleMask(d, r, dab.hardness, paintColor, baseA);
+    if (d != m_lastD || dab.hardness != m_lastH)
+    {
+        m_maskCache = makeSoftCircleMask(d, r, dab.hardness, Qt::white, 255);
+        m_lastD = d; m_lastH = dab.hardness;
+    }
+
+    // Pre-scale shape mask once per size change
+    QImage shapeDab;
+    if (dab.shapeMask && !dab.shapeMask->isNull())
+    {
+        if (d != m_shapeD) {
+            m_shapeCache = dab.shapeMask->scaled(d, d, Qt::IgnoreAspectRatio,
+                                                  Qt::SmoothTransformation)
+                           .convertToFormat(QImage::Format_Grayscale8);
+            m_shapeD = d;
+        }
+        shapeDab = m_shapeCache;
+    }
+
+    QImage mask(d, d, QImage::Format_ARGB32_Premultiplied);
+    mask.fill(Qt::transparent);
+    for (int y = 0; y < d; ++y) {
+        QRgb       *dst  = reinterpret_cast<QRgb *>(mask.scanLine(y));
+        const QRgb *src  = reinterpret_cast<const QRgb *>(m_maskCache.constScanLine(y));
+        const uchar *shp = shapeDab.isNull() ? nullptr : shapeDab.constScanLine(y);
+        for (int x = 0; x < d; ++x) {
+            float circleA = qAlpha(src[x]) / 255.0f;
+            float shapeA  = shp ? (255 - shp[x]) / 255.0f : 1.0f;
+            const int a   = static_cast<int>(circleA * shapeA * baseA);
+            dst[x] = a > 0 ? qPremultiply(qRgba(paintColor.red(), paintColor.green(),
+                                                 paintColor.blue(), a)) : 0;
+        }
+    }
     p.drawImage(dab.center - QPointF(d * 0.5, d * 0.5), mask);
 }
 
@@ -343,17 +371,71 @@ void WaterColorTip::stamp(QPainter &p, const DabParams &dab)
     );
 
     const float effOpacity = dab.opacity * (1.0f - dab.dilution);
-    const float r  = dab.diameter * 0.5f;
-    const int   d  = static_cast<int>(std::ceil(dab.diameter)) + 2;
+    const float r   = dab.diameter * 0.5f;
+    const int   d   = static_cast<int>(std::ceil(dab.diameter)) + 2;
     const int baseA = static_cast<int>(effOpacity * 255.0f);
 
-    QImage mask = makeSoftCircleMask(d, r, dab.hardness, paintColor, baseA);
+// Cache only the blurred alpha shape — color is applied fresh every dab
+    if (d != m_lastD)
+    {
+        // Build a white soft-circle mask and blur it — no color baked in
+        QImage alphaMask(d, d, QImage::Format_ARGB32_Premultiplied);
+        alphaMask.fill(Qt::transparent);
+        const float hc = r * dab.hardness;
+        const float se = std::max(r - hc, 0.001f);
+        for (int y = 0; y < d; ++y) {
+            QRgb *row = reinterpret_cast<QRgb *>(alphaMask.scanLine(y));
+            for (int x = 0; x < d; ++x) {
+                const float dx = x - d*0.5f, dy = y - d*0.5f;
+                const float dist2 = dx * dx + dy * dy;
+                if (dist2 >= r * r) continue;   // early reject without sqrt
+                const float dist = std::sqrt(dist2);  // only computed for pixels inside the circle
+                if (dist >= r) continue;
+                float a = 1.0f;
+                if (dist > hc) { const float t=(dist-hc)/se; a=0.5f*(1.0f+std::cos(t*3.14159265f)); }
+                row[x] = qPremultiply(qRgba(255,255,255,static_cast<int>(a*255.0f)));
+            }
+        }
+        const int blurRadius = static_cast<int>(dab.blurPressure * r * 0.5f);
+        if (blurRadius > 0)
+            alphaMask = boxBlur(alphaMask, blurRadius);
+        m_maskCache = alphaMask;
+        m_lastD = d;
+    }
 
-    // ── Blur the mask proportionally to blurPressure * pressure ───────────
-    const int blurRadius = static_cast<int>(dab.blurPressure * dab.pressure * r * 0.5f);
-    if (blurRadius > 0)
-        mask = boxBlur(mask, blurRadius);
+    // Apply color + opacity fresh every dab onto the cached alpha shape
+    QImage mask(d, d, QImage::Format_ARGB32_Premultiplied);
+    mask.fill(Qt::transparent);
 
+    QImage shapeDab;
+    if (dab.shapeMask && !dab.shapeMask->isNull())
+    {
+        if (d != m_shapeD) {
+            m_shapeCache = dab.shapeMask->scaled(d, d, Qt::IgnoreAspectRatio,
+                                                  Qt::SmoothTransformation)
+                           .convertToFormat(QImage::Format_Grayscale8);
+            m_shapeD = d;
+        }
+        shapeDab = m_shapeCache;
+    }
+    else
+    {
+        m_shapeCache = QImage();
+        m_shapeD     = -1;
+    }
+
+    for (int y = 0; y < d; ++y) {
+        QRgb        *dst = reinterpret_cast<QRgb *>(mask.scanLine(y));
+        const QRgb  *src = reinterpret_cast<const QRgb *>(m_maskCache.constScanLine(y));
+        const uchar *shp = shapeDab.isNull() ? nullptr : shapeDab.constScanLine(y);
+        for (int x = 0; x < d; ++x) {
+            float circleA = qAlpha(src[x]) / 255.0f;
+            float shapeA  = shp ? (255 - shp[x]) / 255.0f : 1.0f;
+            const int a   = static_cast<int>(circleA * shapeA * baseA);
+            dst[x] = a > 0 ? qPremultiply(qRgba(paintColor.red(), paintColor.green(),
+                                                 paintColor.blue(), a)) : 0;
+        }
+    }
     p.drawImage(dab.center - QPointF(d * 0.5, d * 0.5), mask);
 }
 
@@ -400,18 +482,55 @@ void MarkerTip::stamp(QPainter &p, const DabParams &dab)
         static_cast<int>(dab.color.blue()  * (1.0f - b) + m_sample.blue()  * b)
     );
 
-    // Marker: fixed opacity regardless of pressure (that's what makes it feel like a marker)
     const float r   = dab.diameter * 0.5f;
     const int   d   = static_cast<int>(std::ceil(dab.diameter)) + 2;
     const int baseA = static_cast<int>(dab.opacity * 255.0f);
 
-    QImage mask = makeSoftCircleMask(d, r, dab.hardness, paintColor, baseA);
+    if (d != m_lastD)
+    {
+        QImage mask = makeSoftCircleMask(d, r, dab.hardness, paintColor, baseA);
+        const int blurRadius = static_cast<int>(dab.blurPressure * dab.pressure * r * 0.5f);
+        if (blurRadius > 0)
+            mask = doBoxBlur(mask, blurRadius);
+        m_maskCache = mask;
+        m_lastD = d;
+    }
 
-    const int blurRadius = static_cast<int>(dab.blurPressure * dab.pressure * r * 0.5f);
-    if (blurRadius > 0)
-        mask = doBoxBlur(mask, blurRadius);
+    // Cache scaled shape mask — only rescale when brush size changes
+    if (dab.shapeMask && !dab.shapeMask->isNull() && d != m_shapeD)
+    {
+        m_shapeCache = dab.shapeMask->scaled(d, d, Qt::IgnoreAspectRatio,
+                                              Qt::SmoothTransformation)
+                       .convertToFormat(QImage::Format_Grayscale8);
+        m_shapeD = d;
+    }
+    if (!dab.shapeMask || dab.shapeMask->isNull())
+    {
+        m_shapeCache = QImage();
+        m_shapeD     = -1;
+    }
 
-    p.drawImage(dab.center - QPointF(d * 0.5, d * 0.5), mask);
+    if (m_shapeCache.isNull())
+    {
+        p.drawImage(dab.center - QPointF(d * 0.5, d * 0.5), m_maskCache);
+    }
+    else
+    {
+        QImage mask(d, d, QImage::Format_ARGB32_Premultiplied);
+        mask.fill(Qt::transparent);
+        for (int y = 0; y < d; ++y) {
+            QRgb        *dst = reinterpret_cast<QRgb *>(mask.scanLine(y));
+            const QRgb  *src = reinterpret_cast<const QRgb *>(m_maskCache.constScanLine(y));
+            const uchar *shp = m_shapeCache.constScanLine(y);
+            for (int x = 0; x < d; ++x) {
+                const float shapeA = (255 - shp[x]) / 255.0f;
+                const int a = static_cast<int>(qAlpha(src[x]) * shapeA);
+                dst[x] = a > 0 ? qPremultiply(qRgba(qRed(src[x]), qGreen(src[x]),
+                                                     qBlue(src[x]), a)) : 0;
+            }
+        }
+        p.drawImage(dab.center - QPointF(d * 0.5, d * 0.5), mask);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -444,8 +563,12 @@ void SmudgeTip::stamp(QPainter &p, const DabParams &dab)
     const float colorMix       = dab.coloring;
     const float uncolor        = dab.uncolorPressure * dab.pressure;
 
-    QImage mask(d, d, QImage::Format_ARGB32_Premultiplied);
-    mask.fill(Qt::transparent);
+    if (d != m_lastD) {
+        m_maskCache = QImage(d, d, QImage::Format_ARGB32_Premultiplied);
+        m_lastD = d;
+    }
+    m_maskCache.fill(Qt::transparent);
+    QImage &mask = m_maskCache;
 
     for (int y = 0; y < d; ++y)
     {
@@ -456,7 +579,9 @@ void SmudgeTip::stamp(QPainter &p, const DabParams &dab)
         for (int x = 0; x < d; ++x)
         {
             const float dx   = x - cx, dy = y - cy;
-            const float dist = std::sqrt(dx * dx + dy * dy);
+            const float dist2 = dx * dx + dy * dy;
+            if (dist2 >= r * r) continue;   // early reject without sqrt
+            const float dist = std::sqrt(dist2);  // only computed for pixels inside the circle
             if (dist >= r) continue;
 
             float edge = 1.0f;
@@ -512,7 +637,13 @@ void BlurTip::stamp(QPainter &p, const DabParams &dab)
     // Use the soft circle alpha mask to blend blurred back onto canvas
     QImage alphaMask = makeAlphaMask(d, r, dab.hardness);
 
-    QImage output(d, d, QImage::Format_ARGB32_Premultiplied);
+    // Reuse output buffer — only reallocate when size changes
+    static QImage output;
+    static int lastBlurD = -1;
+    if (d != lastBlurD) {
+        output = QImage(d, d, QImage::Format_ARGB32_Premultiplied);
+        lastBlurD = d;
+    }
     output.fill(Qt::transparent);
 
     for (int y = 0; y < d; ++y)
@@ -532,8 +663,7 @@ void BlurTip::stamp(QPainter &p, const DabParams &dab)
         }
     }
 
-    // Paint the output directly — use SourceOver so alpha composites correctly
-    p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    // Do NOT override composition mode — BrushEngine sets it before stamp() is called
     p.drawImage(topLeft, output);
 }
 
@@ -569,7 +699,9 @@ void ChalkTip::stamp(QPainter &p, const DabParams &dab)
         for (int x = 0; x < d; ++x)
         {
             const float dx   = x - cx, dy = y - cy;
-            const float dist = std::sqrt(dx * dx + dy * dy);
+            const float dist2 = dx * dx + dy * dy;
+            if (dist2 >= r * r) continue;   // early reject without sqrt
+            const float dist = std::sqrt(dist2);  // only computed for pixels inside the circle
             if (dist >= r || nextFloat() > density) continue;
 
             float alpha = 1.0f;
@@ -611,27 +743,27 @@ QImage TextureTip::loadGrayscaleMask(const QString &path, int /*targetSize*/)
     QImage src(path);
     if (src.isNull()) return {};
 
-    // Pre-binarize at native resolution: strip blue boundary-circle pixels
-    // (B >> R,G) and collapse near-white fringe noise to pure white.
-    // Stored at native size so stamp() scales exactly once — a second
-    // bilinear scale would re-introduce ghost pixels that were clipped here.
+    // BMPs use white background (255) + dark ink (0–127).
+    // Binarize: dark pixels → black (ink), everything else → white (bg).
+    // Blue-channel boundary pixels (some exporters) → white (strip them).
     src = src.convertToFormat(QImage::Format_RGB32);
     for (int y = 0; y < src.height(); ++y)
     {
         QRgb *row = reinterpret_cast<QRgb *>(src.scanLine(y));
         for (int x = 0; x < src.width(); ++x)
         {
-            const int r   = qRed(row[x]);
-            const int g   = qGreen(row[x]);
-            const int b_  = qBlue(row[x]);
+            const int r  = qRed(row[x]);
+            const int g  = qGreen(row[x]);
+            const int b_ = qBlue(row[x]);
             const int lum = (r + g + b_) / 3;
-            if (b_ - r > 40 && b_ - g > 40)  row[x] = qRgb(255,255,255);
-            else if (lum <= 127)               row[x] = qRgb(0,0,0);
-            else                               row[x] = qRgb(255,255,255);
+            if (b_ - r > 40 && b_ - g > 40) row[x] = qRgb(255, 255, 255);
+            else if (lum <= 127)             row[x] = qRgb(0, 0, 0);
+            else                             row[x] = qRgb(255, 255, 255);
         }
     }
     return src.convertToFormat(QImage::Format_Grayscale8);
 }
+
 void TextureTip::stamp(QPainter &p, const DabParams &dab)
 {
     if (dab.diameter < 0.5f) return;
@@ -679,20 +811,31 @@ void TextureTip::stamp(QPainter &p, const DabParams &dab)
         QRgb *row = reinterpret_cast<QRgb *>(mask.scanLine(y));
         for (int x = 0; x < d; ++x)
         {
-            // ── Soft-circle clip ─────────────────────────────────────────────
+            // ── Circle clip — skip entirely if a shape BMP is active ──────────
             const float dx2  = x - cx;
             const float dy2  = y - cy;
-            const float dist = std::sqrt(dx2 * dx2 + dy2 * dy2);
-            if (dist >= r) { row[x] = 0; continue; }
+            const float dist2 = dx2 * dx2 + dy2 * dy2;
+            if (dist2 >= r * r) { row[x] = 0; continue; }
 
             float circleAlpha;
-            if (dist > hardCore)
+            if (shapeDab.isNull())
             {
-                const float t = (dist - hardCore) / softEdge;
-                circleAlpha = 0.5f * (1.0f + std::cos(t * 3.14159265f));
+                // No shape BMP — use soft circle as the dab boundary
+                const float dist = std::sqrt(dist2);
+                if (dist > hardCore)
+                {
+                    const float t = (dist - hardCore) / softEdge;
+                    circleAlpha = 0.5f * (1.0f + std::cos(t * 3.14159265f));
+                }
+                else
+                {
+                    circleAlpha = 1.0f;
+                }
             }
             else
             {
+                // Shape BMP is active — let the shape define the boundary,
+                // no circle softness so no ghost fringe outside the shape
                 circleAlpha = 1.0f;
             }
 
@@ -717,7 +860,10 @@ void TextureTip::stamp(QPainter &p, const DabParams &dab)
                 const int ty = ((originY + y) % texH + texH) % texH;
                 const uchar raw = reinterpret_cast<const uchar *>(
                     m_texture.constScanLine(ty))[tx];
-                texAlpha = (255 - raw) / 255.0f;
+                // raw=0 → full ink, raw=255 → transparent.
+                // textureStrength blends between no-texture (1.0) and full-texture.
+                const float t = (255 - raw) / 255.0f;
+                texAlpha = 1.0f - dab.textureStrength * (1.0f - t);
             }
 
             const int a = std::clamp(

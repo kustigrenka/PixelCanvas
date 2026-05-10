@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QObject>
-#include <QStack>
+#include <QVector>
 #include <QImage>
 
 struct Snapshot
@@ -15,30 +15,34 @@ class UndoStack : public QObject
     Q_OBJECT
 
 public:
-    static constexpr int kMaxSteps = 50;
+    static constexpr int kMaxSteps = 100;
 
     explicit UndoStack(QObject *parent = nullptr);
 
     void pushSnapshot(int layerIndex, const QImage &pixels);
 
-    bool canUndo() const { return !m_undoStack.isEmpty(); }
-    bool canRedo() const { return !m_redoStack.isEmpty(); }
+    bool canUndo() const { return m_cursor > 0; }
+    bool canRedo() const { return m_cursor < m_snapshots.size() - 1; }
 
-    Snapshot undo(int currentLayerIndex, const QImage &currentPixels);
-    Snapshot redo(int currentLayerIndex, const QImage &currentPixels);
+    Snapshot undo();
+    Snapshot redo();
 
-    int peekUndoLayerIndex() const { return canUndo() ? m_undoStack.top().layerIndex : 0; }
-    int peekRedoLayerIndex() const { return canRedo() ? m_redoStack.top().layerIndex : 0; }
+    // For the history slider
+    int  historySize()   const { return m_snapshots.size(); }
+    int  currentIndex()  const { return m_cursor; }
+    Snapshot snapshotAt(int index) const { return m_snapshots.value(index); }
+
+    int peekUndoLayerIndex() const { return canUndo() ? m_snapshots[m_cursor - 1].layerIndex : 0; }
+    int peekRedoLayerIndex() const { return canRedo() ? m_snapshots[m_cursor + 1].layerIndex : 0; }
 
     void clear();
-    
 
 signals:
     void undoAvailable(bool available);
     void redoAvailable(bool available);
+    void historyChanged();   // emitted on push/undo/redo/clear — slider listens to this
 
 private:
-    QStack<Snapshot> m_undoStack;
-    QStack<Snapshot> m_redoStack;
+    QVector<Snapshot> m_snapshots;
+    int               m_cursor = -1;   // points to current state, -1 = empty
 };
-
