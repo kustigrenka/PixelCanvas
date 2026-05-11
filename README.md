@@ -180,29 +180,45 @@ pixel_canvas/
 
 ---
 
-## Building from Source
+## Downloading & Running (AppImage)
 
-### Dependencies
+The easiest way to run PixelCanvas on Linux is via the prebuilt AppImage — no installation required.
 
+### Download
+Download the latest `PixelCanvas-x86_64.AppImage` from the [Releases](https://github.com/kustigrenka/PixelCanvas/releases) page.
+
+### Run
 ```bash
-# Ubuntu / Debian
-sudo apt install \
-  qt6-base-dev qt6-opengl-dev \
-  libopencv-dev \
-  libxi-dev libx11-dev libxcb-xinput-dev \
-  cmake build-essential
+chmod +x PixelCanvas-x86_64.AppImage
+./PixelCanvas-x86_64.AppImage
 ```
 
-### Build
+That's it — no dependencies to install, no compilation needed.
+
+### Building the AppImage yourself
+If you want to build the AppImage from source:
 
 ```bash
+# 1. Build the project
 cmake -B build -S .
 cmake --build build -j$(nproc)
+
+# 2. Download linuxdeploy
+wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+wget https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+
+# 3. Create AppDir structure
+mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+cp build/PixelCanvas AppDir/usr/bin/
+cp resources/app.png AppDir/usr/share/icons/hicolor/256x256/apps/pixelcanvas.png
+
+# 4. Build the AppImage
+QMAKE=$(which qmake6) ./linuxdeploy-x86_64.AppImage \
+  --appdir AppDir \
+  --plugin qt \
+  --output appimage
 ```
-
-To disable XInput2 (e.g. for a Wayland-only build), omit the `libXi` and `libxcb-xinput` packages. CMake detects their absence and sets `PIXEL_CANVAS_XI2=OFF` automatically — the XI2 code path compiles to nothing.
-
----
 
 ## Authors
 

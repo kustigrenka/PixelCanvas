@@ -13,3 +13,6 @@ ui_*.h
 qrc_*.cpp
 *.user
 .qtcreator/
+*.AppImage
+AppDir/
+build/
