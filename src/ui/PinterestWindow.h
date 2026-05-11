@@ -1,17 +1,20 @@
 #pragma once
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PinterestWindow.h
 //
 // A frameless floating QDialog that embeds Pinterest in a QWebEngineView.
-// It has a slim custom title bar (drag-to-move, close button, "⬡ Pinterest"
-// label) and a URL bar so the user can also navigate freely.
+// Provides a slim custom title bar (drag-to-move, close button, "P Pinterest"
+// label) and a URL bar for free navigation.
 //
-// Falls back to a plain QLabel with instructions when Qt WebEngine is absent.
+// Falls back to a plain "Open in browser" button when Qt WebEngine is absent.
 //
-// Position: right edge of the parent (MainWindow), 360px wide, full height.
+// Position: right edge of the parent (MainWindow), 400 px wide, full height.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #include <QDialog>
+#include <QPoint>
+#include <QSize>
 
 class QLineEdit;
 
@@ -19,7 +22,6 @@ class QLineEdit;
 class QWebEngineView;
 #endif
 
-// ─────────────────────────────────────────────────────────────────────────────
 class PinterestWindow : public QDialog
 {
     Q_OBJECT
@@ -37,12 +39,16 @@ private:
     void buildUI();
     void navigate(const QString &url);
 
-    QLineEdit  *m_urlBar   = nullptr;
-    bool        m_dragging    = false;
-    QPoint      m_dragOrigin;
-    bool        m_resizing    = false;
-    QPoint      m_resizeStart;
-    QSize       m_resizeStartSize;
+    QLineEdit *m_urlBar = nullptr;
+
+    // ── Drag-to-move state ────────────────────────────────────────────────────
+    bool   m_dragging  = false;
+    QPoint m_dragOrigin;
+
+    // ── Resize-grip state ─────────────────────────────────────────────────────
+    bool   m_resizing        = false;
+    QPoint m_resizeStart;
+    QSize  m_resizeStartSize;
 
 #ifdef QT_WEBENGINEWIDGETS_LIB
     QWebEngineView *m_webView = nullptr;

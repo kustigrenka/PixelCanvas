@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// PinterestWindow.cpp
+// PinterestWindow.cpp  –  floating Pinterest reference panel
 // ─────────────────────────────────────────────────────────────────────────────
 #include "PinterestWindow.h"
 
@@ -13,9 +13,9 @@
 #include <QGuiApplication>
 #include <QDesktopServices>
 #include <QEvent>
-#include <algorithm>
 #include <QUrl>
 #include <QApplication>
+#include <algorithm>
 
 #ifdef QT_WEBENGINEWIDGETS_LIB
 #  include <QWebEngineView>
@@ -29,16 +29,16 @@ static constexpr char kPinterestUrl[] = "https://www.pinterest.com/";
 static constexpr int  kPanelWidth     = 400;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Construction
+// ─────────────────────────────────────────────────────────────────────────────
+
 PinterestWindow::PinterestWindow(QWidget *parent)
-    : QDialog(parent,
-              Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint)
+    : QDialog(parent, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint)
 {
     setAttribute(Qt::WA_DeleteOnClose, false);
     setObjectName("PinterestWindow");
 
 #ifdef QT_WEBENGINEWIDGETS_LIB
-    // Must be set before QApplication is created — but since we're late,
-    // set it now; Qt will use it for any new engine processes
     qputenv("QTWEBENGINEPROCESS_PATH", "/usr/lib/qt6/libexec/QtWebEngineProcess");
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu");
 #endif
@@ -46,17 +46,21 @@ PinterestWindow::PinterestWindow(QWidget *parent)
     buildUI();
 
     QRect screen = QGuiApplication::primaryScreen()->availableGeometry();
-    if (parent) {
-        QRect pw = parent->geometry();
-        screen   = QRect(pw.left(), pw.top(), pw.width(), pw.height());
+    if (parent)
+    {
+        const QRect pw = parent->geometry();
+        screen = QRect(pw.left(), pw.top(), pw.width(), pw.height());
     }
     const int h = screen.height() - 40;
     setGeometry(screen.right() - kPanelWidth - 4,
-                screen.top() + 20,
-                kPanelWidth, h);
+                screen.top()  + 20,
+                kPanelWidth,   h);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// UI construction
+// ─────────────────────────────────────────────────────────────────────────────
+
 void PinterestWindow::buildUI()
 {
     setStyleSheet("QDialog { background:#1e1e1e; border:1px solid #111; }");
@@ -69,18 +73,22 @@ void PinterestWindow::buildUI()
     // ── Title bar ─────────────────────────────────────────────────────────────
     auto *titleBar = new QWidget(this);
     titleBar->setFixedHeight(34);
-    titleBar->setStyleSheet("QWidget { background:#c0392b; border-bottom:1px solid #7b241c; }");
+    titleBar->setStyleSheet(
+        "QWidget { background:#c0392b; border-bottom:1px solid #7b241c; }");
 
     auto *tbLayout = new QHBoxLayout(titleBar);
     tbLayout->setContentsMargins(8, 0, 4, 0);
     tbLayout->setSpacing(4);
 
     auto *pinIcon = new QLabel("P", titleBar);
-    pinIcon->setStyleSheet("QLabel { color:#fff; font-size:17px; font-weight:bold; font-family:Georgia,serif; background:transparent; border:none; }");
+    pinIcon->setStyleSheet(
+        "QLabel { color:#fff; font-size:17px; font-weight:bold; font-family:Georgia,serif; "
+        "background:transparent; border:none; }");
     tbLayout->addWidget(pinIcon);
 
     auto *titleLbl = new QLabel("Pinterest", titleBar);
-    titleLbl->setStyleSheet("QLabel { color:#fff; font-weight:bold; font-size:13px; background:transparent; border:none; }");
+    titleLbl->setStyleSheet(
+        "QLabel { color:#fff; font-weight:bold; font-size:13px; background:transparent; border:none; }");
     tbLayout->addWidget(titleLbl, 1);
 
     auto *closeBtn = new QToolButton(titleBar);
@@ -97,35 +105,37 @@ void PinterestWindow::buildUI()
     // ── Navigation bar ────────────────────────────────────────────────────────
     auto *navBar = new QWidget(this);
     navBar->setFixedHeight(32);
-    navBar->setStyleSheet("QWidget { background:#1a1a1a; border-bottom:1px solid #111; }");
+    navBar->setStyleSheet(
+        "QWidget { background:#1a1a1a; border-bottom:1px solid #111; }");
 
     auto *navLayout = new QHBoxLayout(navBar);
     navLayout->setContentsMargins(6, 3, 6, 3);
     navLayout->setSpacing(4);
 
+    const QString navBtnStyle =
+        "QToolButton { background:#2b2b2b; color:#d0d0d0; border:1px solid #444; border-radius:3px; font-size:15px; }"
+        "QToolButton:hover { background:#3a3a3a; }";
+
 #ifdef QT_WEBENGINEWIDGETS_LIB
-    // Back / Forward buttons
     auto *backBtn = new QToolButton(navBar);
     backBtn->setText("‹");
     backBtn->setFixedSize(22, 22);
-    backBtn->setStyleSheet(
-        "QToolButton { background:#2b2b2b; color:#d0d0d0; border:1px solid #444; border-radius:3px; font-size:15px; }"
-        "QToolButton:hover { background:#3a3a3a; }");
+    backBtn->setStyleSheet(navBtnStyle);
     navLayout->addWidget(backBtn);
 
     auto *fwdBtn = new QToolButton(navBar);
     fwdBtn->setText("›");
     fwdBtn->setFixedSize(22, 22);
-    fwdBtn->setStyleSheet(backBtn->styleSheet());
+    fwdBtn->setStyleSheet(navBtnStyle);
     navLayout->addWidget(fwdBtn);
 
     auto *homeBtn = new QToolButton(navBar);
     homeBtn->setText("⌂");
     homeBtn->setFixedSize(22, 22);
     homeBtn->setToolTip("Pinterest home");
-    homeBtn->setStyleSheet(backBtn->styleSheet());
+    homeBtn->setStyleSheet(navBtnStyle);
     connect(homeBtn, &QToolButton::clicked, this, [this]() {
-        navigate("https://www.pinterest.com/");
+        navigate(kPinterestUrl);
     });
     navLayout->addWidget(homeBtn);
 #endif
@@ -152,7 +162,6 @@ void PinterestWindow::buildUI()
 #ifdef QT_WEBENGINEWIDGETS_LIB
     m_webView = new QWebEngineView(this);
 
-    // Persistent profile — stays logged in between sessions
     auto *profile = new QWebEngineProfile("pinterest_profile", m_webView);
     profile->setPersistentCookiesPolicy(QWebEngineProfile::AllowPersistentCookies);
     profile->setHttpUserAgent(
@@ -162,33 +171,33 @@ void PinterestWindow::buildUI()
     auto *page = new QWebEnginePage(profile, m_webView);
     m_webView->setPage(page);
 
-    m_webView->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled,       true);
-    m_webView->settings()->setAttribute(QWebEngineSettings::LocalStorageEnabled,     true);
-    m_webView->settings()->setAttribute(QWebEngineSettings::ScrollAnimatorEnabled,   true);
-    m_webView->settings()->setAttribute(QWebEngineSettings::PluginsEnabled,          true);
-    m_webView->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows,true);
+    m_webView->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled,        true);
+    m_webView->settings()->setAttribute(QWebEngineSettings::LocalStorageEnabled,      true);
+    m_webView->settings()->setAttribute(QWebEngineSettings::ScrollAnimatorEnabled,    true);
+    m_webView->settings()->setAttribute(QWebEngineSettings::PluginsEnabled,           true);
+    m_webView->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, true);
 
     m_webView->setUrl(QUrl(kPinterestUrl));
 
+    // Redirect "open in new tab/window" back into the same view.
     connect(page, &QWebEnginePage::newWindowRequested, this,
-            [this](QWebEngineNewWindowRequest &req) {
+            [this](QWebEngineNewWindowRequest &req)
+    {
         m_webView->setUrl(req.requestedUrl());
         req.openIn(m_webView->page());
     });
 
-    // Sync URL bar
     connect(m_webView, &QWebEngineView::urlChanged, this, [this](const QUrl &u) {
         m_urlBar->setText(u.toString());
     });
 
-    // Wire back/forward
     connect(backBtn, &QToolButton::clicked, m_webView, &QWebEngineView::back);
     connect(fwdBtn,  &QToolButton::clicked, m_webView, &QWebEngineView::forward);
 
     root->addWidget(m_webView, 1);
 
 #else
-    // ── Fallback ──────────────────────────────────────────────────────────────
+    // ── Fallback (no WebEngine) ───────────────────────────────────────────────
     auto *fallbackWidget = new QWidget(this);
     fallbackWidget->setStyleSheet("QWidget { background:#1e1e1e; }");
     auto *fl = new QVBoxLayout(fallbackWidget);
@@ -198,12 +207,14 @@ void PinterestWindow::buildUI()
 
     auto *icon = new QLabel("⬡", fallbackWidget);
     icon->setAlignment(Qt::AlignCenter);
-    icon->setStyleSheet("QLabel { color:#c0392b; font-size:48px; background:transparent; border:none; }");
+    icon->setStyleSheet(
+        "QLabel { color:#c0392b; font-size:48px; background:transparent; border:none; }");
     fl->addWidget(icon);
 
     auto *heading = new QLabel("Open Pinterest", fallbackWidget);
     heading->setAlignment(Qt::AlignCenter);
-    heading->setStyleSheet("QLabel { color:#d0d0d0; font-size:15px; font-weight:bold; background:transparent; border:none; }");
+    heading->setStyleSheet(
+        "QLabel { color:#d0d0d0; font-size:15px; font-weight:bold; background:transparent; border:none; }");
     fl->addWidget(heading);
 
     auto *desc = new QLabel(
@@ -211,7 +222,8 @@ void PinterestWindow::buildUI()
         fallbackWidget);
     desc->setAlignment(Qt::AlignCenter);
     desc->setWordWrap(true);
-    desc->setStyleSheet("QLabel { color:#888; font-size:11px; background:transparent; border:none; }");
+    desc->setStyleSheet(
+        "QLabel { color:#888; font-size:11px; background:transparent; border:none; }");
     fl->addWidget(desc);
 
     auto *openBtn = new QToolButton(fallbackWidget);
@@ -221,9 +233,11 @@ void PinterestWindow::buildUI()
         "QToolButton { background:#c0392b; color:#fff; border:none; border-radius:5px; "
         "font-size:12px; font-weight:bold; padding:0 16px; }"
         "QToolButton:hover { background:#e74c3c; }");
-    connect(openBtn, &QToolButton::clicked, this, []() {
+    connect(openBtn, &QToolButton::clicked, this, []()
+    {
         QDesktopServices::openUrl(QUrl(kPinterestUrl));
     });
+
     auto *btnRow = new QHBoxLayout;
     btnRow->addStretch(1);
     btnRow->addWidget(openBtn);
@@ -231,7 +245,8 @@ void PinterestWindow::buildUI()
     fl->addLayout(btnRow);
     fl->addStretch(2);
     root->addWidget(fallbackWidget, 1);
-    // ── Resize grip ───────────────────────────────────────────────────────────
+
+    // Resize grip
     auto *grip = new QWidget(this);
     grip->setFixedHeight(8);
     grip->setStyleSheet("QWidget { background:#111; border-top:1px solid #333; }");
@@ -243,15 +258,18 @@ void PinterestWindow::buildUI()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Navigation
+// ─────────────────────────────────────────────────────────────────────────────
+
 void PinterestWindow::navigate(const QString &url)
 {
     QString target = url.trimmed();
     if (!target.startsWith("http://") && !target.startsWith("https://"))
         target = "https://www.pinterest.com/search/pins/?q="
                  + QString::fromUtf8(QUrl::toPercentEncoding(target));
+
 #ifdef QT_WEBENGINEWIDGETS_LIB
-    if (m_webView)
-        m_webView->setUrl(QUrl(target));
+    if (m_webView) m_webView->setUrl(QUrl(target));
 #else
     QDesktopServices::openUrl(QUrl(target));
 #endif
@@ -259,23 +277,32 @@ void PinterestWindow::navigate(const QString &url)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Mouse events  (drag-to-move via title bar, resize via grip)
+// ─────────────────────────────────────────────────────────────────────────────
+
 void PinterestWindow::mousePressEvent(QMouseEvent *e)
 {
-    if (e->button() == Qt::LeftButton && e->position().y() < 34) {
+    if (e->button() == Qt::LeftButton && e->position().y() < 34)
+    {
         m_dragging   = true;
         m_dragOrigin = e->globalPosition().toPoint() - frameGeometry().topLeft();
         e->accept();
-    } else {
+    }
+    else
+    {
         QDialog::mousePressEvent(e);
     }
 }
 
 void PinterestWindow::mouseMoveEvent(QMouseEvent *e)
 {
-    if (m_dragging) {
+    if (m_dragging)
+    {
         move(e->globalPosition().toPoint() - m_dragOrigin);
         e->accept();
-    } else {
+    }
+    else
+    {
         QDialog::mouseMoveEvent(e);
     }
 }
@@ -288,23 +315,29 @@ void PinterestWindow::mouseReleaseEvent(QMouseEvent *e)
 
 bool PinterestWindow::eventFilter(QObject *obj, QEvent *e)
 {
-    if (obj->objectName() == "resizeGrip") {
-        if (e->type() == QEvent::MouseButtonPress) {
-            auto *me = static_cast<QMouseEvent*>(e);
-            if (me->button() == Qt::LeftButton) {
+    if (obj->objectName() == "resizeGrip")
+    {
+        if (e->type() == QEvent::MouseButtonPress)
+        {
+            auto *me = static_cast<QMouseEvent *>(e);
+            if (me->button() == Qt::LeftButton)
+            {
                 m_resizing        = true;
                 m_resizeStart     = me->globalPosition().toPoint();
                 m_resizeStartSize = size();
                 return true;
             }
-        } else if (e->type() == QEvent::MouseMove && m_resizing) {
-            auto *me = static_cast<QMouseEvent*>(e);
+        }
+        else if (e->type() == QEvent::MouseMove && m_resizing)
+        {
+            auto *me     = static_cast<QMouseEvent *>(e);
             QPoint delta = me->globalPosition().toPoint() - m_resizeStart;
-            int newW = std::max(250, m_resizeStartSize.width()  + delta.x());
-            int newH = std::max(300, m_resizeStartSize.height() + delta.y());
-            resize(newW, newH);
+            resize(std::max(250, m_resizeStartSize.width()  + delta.x()),
+                   std::max(300, m_resizeStartSize.height() + delta.y()));
             return true;
-        } else if (e->type() == QEvent::MouseButtonRelease) {
+        }
+        else if (e->type() == QEvent::MouseButtonRelease)
+        {
             m_resizing = false;
             return true;
         }

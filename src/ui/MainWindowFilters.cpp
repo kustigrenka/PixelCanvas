@@ -1,12 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // MainWindowFilters.cpp
 //
-// Filter menu dialog slots for MainWindow: onFilterBlur(),
-// onFilterBrightnessContrast(), onFilterInvert(), onFilterSharpen().
+// Filter menu dialog slots for MainWindow:
+//   onFilterBlur(), onFilterBrightnessContrast(),
+//   onFilterInvert(), onFilterSharpen()
 //
 // Each slot builds a small modal dialog, constructs the matching Filter with
-// user-chosen parameters, then calls canvasWidget->applyFilter(). That method
-// handles: push undo snapshot → apply → recomposite → update().
+// the user-chosen parameters, then calls CanvasWidget::applyFilter(). That
+// method handles: push undo snapshot → apply → recomposite → update().
 // ─────────────────────────────────────────────────────────────────────────────
 #include "MainWindow.h"
 
@@ -20,7 +21,10 @@
 #include "Filter.h"
 #include "CanvasWidget.h"
 
-// ── Blur ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Gaussian Blur
+// ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onFilterBlur()
 {
     QDialog dlg(this);
@@ -38,8 +42,7 @@ void MainWindow::onFilterBlur()
     form->addWidget(new QLabel(tr("Radius:"), &dlg), 0, 0);
     form->addWidget(radiusSpin,                      0, 1);
 
-    auto *buttons = new QDialogButtonBox(
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
     form->addWidget(buttons, 1, 0, 1, 2);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -50,7 +53,10 @@ void MainWindow::onFilterBlur()
     m_canvas->applyFilter(&filter);
 }
 
-// ── Brightness / Contrast ────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Brightness / Contrast
+// ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onFilterBrightnessContrast()
 {
     QDialog dlg(this);
@@ -75,8 +81,7 @@ void MainWindow::onFilterBrightnessContrast()
     form->addWidget(new QLabel(tr("Contrast (0.0 … 3.0):"),    &dlg), 1, 0);
     form->addWidget(contrastSpin,                                      1, 1);
 
-    auto *buttons = new QDialogButtonBox(
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
     form->addWidget(buttons, 2, 0, 1, 2);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -87,14 +92,20 @@ void MainWindow::onFilterBrightnessContrast()
     m_canvas->applyFilter(&filter);
 }
 
-// ── Invert ───────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Invert
+// ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onFilterInvert()
 {
     InvertFilter filter;
     m_canvas->applyFilter(&filter);
 }
 
-// ── Sharpen ──────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Sharpen
+// ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onFilterSharpen()
 {
     QDialog dlg(this);
@@ -113,8 +124,7 @@ void MainWindow::onFilterSharpen()
     form->addWidget(new QLabel(tr("Strength (0.1 … 5.0):"), &dlg), 0, 0);
     form->addWidget(strengthSpin,                                   0, 1);
 
-    auto *buttons = new QDialogButtonBox(
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
     form->addWidget(buttons, 1, 0, 1, 2);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);

@@ -23,7 +23,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // PlaybackCanvas
 // ─────────────────────────────────────────────────────────────────────────────
-PlaybackCanvas::PlaybackCanvas(QWidget *parent) : QWidget(parent)
+
+PlaybackCanvas::PlaybackCanvas(QWidget *parent)
+    : QWidget(parent)
 {
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setMinimumSize(400, 300);
@@ -52,11 +54,12 @@ void PlaybackCanvas::paintEvent(QPaintEvent *)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PlaybackWindow
+// PlaybackWindow  –  construction
 // ─────────────────────────────────────────────────────────────────────────────
+
 PlaybackWindow::PlaybackWindow(const QVector<RecordedEvent> &events,
-                               const QSize &canvasSize,
-                               QWidget *parent)
+                               const QSize                  &canvasSize,
+                               QWidget                      *parent)
     : QWidget(parent, Qt::Window)
     , m_events(events)
     , m_canvasSize(canvasSize)
@@ -65,7 +68,7 @@ PlaybackWindow::PlaybackWindow(const QVector<RecordedEvent> &events,
     setMinimumSize(560, 500);
     setAttribute(Qt::WA_DeleteOnClose);
 
-    // Isolated layer stack + brush engine
+    // Isolated layer stack + brush engine — never touches the main canvas.
     m_undoStack   = new UndoStack(this);
     m_layerStack  = new LayerStack(this);
     m_brushEngine = new BrushEngine(this);
@@ -105,7 +108,7 @@ PlaybackWindow::PlaybackWindow(const QVector<RecordedEvent> &events,
     m_playBtn->setStyleSheet(
         "QPushButton { background:#2e5c99; color:#fff; border:none; border-radius:4px; "
         "font-weight:bold; padding:0 12px; }"
-        "QPushButton:hover { background:#3a74c2; }"
+        "QPushButton:hover    { background:#3a74c2; }"
         "QPushButton:disabled { background:#333; color:#666; }");
 
     m_stopBtn = new QPushButton(tr("■  Stop"), this);
@@ -114,7 +117,7 @@ PlaybackWindow::PlaybackWindow(const QVector<RecordedEvent> &events,
     m_stopBtn->setStyleSheet(
         "QPushButton { background:#7a2a2a; color:#fff; border:none; border-radius:4px; "
         "font-weight:bold; padding:0 12px; }"
-        "QPushButton:hover { background:#c0392b; }"
+        "QPushButton:hover    { background:#c0392b; }"
         "QPushButton:disabled { background:#333; color:#666; }");
 
     m_saveBtn = new QPushButton(tr("💾  Save Video…"), this);
@@ -124,11 +127,12 @@ PlaybackWindow::PlaybackWindow(const QVector<RecordedEvent> &events,
     m_saveBtn->setStyleSheet(
         "QPushButton { background:#2a6a3a; color:#fff; border:none; border-radius:4px; "
         "font-weight:bold; padding:0 12px; }"
-        "QPushButton:hover { background:#27ae60; }"
+        "QPushButton:hover    { background:#27ae60; }"
         "QPushButton:disabled { background:#333; color:#666; }");
 
     auto *speedLabel = new QLabel(tr("Speed:"), this);
     speedLabel->setStyleSheet("color:#aaa; font-size:11px;");
+
     m_speedCombo = new QComboBox(this);
     m_speedCombo->addItem(tr("1×"),   1.0);
     m_speedCombo->addItem(tr("2×"),   2.0);
@@ -138,7 +142,6 @@ PlaybackWindow::PlaybackWindow(const QVector<RecordedEvent> &events,
     m_speedCombo->setCurrentIndex(2);
     m_speed = 4.0;
     m_speedCombo->setFixedHeight(30);
-
     connect(m_speedCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this]() { m_speed = m_speedCombo->currentData().toDouble(); });
 
@@ -167,6 +170,9 @@ PlaybackWindow::PlaybackWindow(const QVector<RecordedEvent> &events,
 PlaybackWindow::~PlaybackWindow() = default;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Playback control
+// ─────────────────────────────────────────────────────────────────────────────
+
 void PlaybackWindow::recomposite()
 {
     QImage composited(m_canvasSize, QImage::Format_ARGB32_Premultiplied);
@@ -174,12 +180,10 @@ void PlaybackWindow::recomposite()
     m_layerStack->recompositeRect(composited, composited.rect());
     m_playCanvas->setImage(composited);
 
-    // Capture frame if saving
     if (m_capturing)
         m_frames.append(composited.copy());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 void PlaybackWindow::startPlayback()
 {
     if (m_events.isEmpty()) return;
@@ -188,7 +192,6 @@ void PlaybackWindow::startPlayback()
     m_capturing = true;
     m_frames.clear();
 
-    // Reset canvas
     m_layerStack->init(m_canvasSize);
     if (Layer *l = m_layerStack->activeLayer())
         m_brushEngine->setActiveLayer(&l->pixels);
@@ -203,17 +206,15 @@ void PlaybackWindow::startPlayback()
     scheduleNext();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 void PlaybackWindow::stopPlayback()
 {
-    m_stopped   = true;   // guards all pending QTimer::singleShot callbacks
+    m_stopped   = true;   // prevents any pending QTimer::singleShot callbacks from firing
     m_capturing = false;
     m_brushEngine->endStroke();
     recomposite();
     finishPlayback(false);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 void PlaybackWindow::finishPlayback(bool completed)
 {
     m_playBtn->setEnabled(true);
@@ -227,13 +228,12 @@ void PlaybackWindow::finishPlayback(bool completed)
     emit playbackFinished();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 void PlaybackWindow::fireEvent()
 {
-    // Stop guard — prevents late timer fires after stopPlayback()
     if (m_stopped) return;
 
-    if (m_index >= m_events.size()) {
+    if (m_index >= m_events.size())
+    {
         m_brushEngine->endStroke();
         m_capturing = false;
         recomposite();
@@ -245,16 +245,21 @@ void PlaybackWindow::fireEvent()
     const RecordedEvent &ev = m_events[m_index];
     m_progress->setValue(m_index);
 
-    if (ev.isBegin) {
+    if (ev.isBegin)
+    {
         if (Layer *l = m_layerStack->activeLayer())
             m_brushEngine->setActiveLayer(&l->pixels);
         m_brushEngine->setSettings(ev.settings);
         m_brushEngine->setColor(ev.color);
         m_brushEngine->beginStroke();
-    } else if (ev.isEnd) {
+    }
+    else if (ev.isEnd)
+    {
         m_brushEngine->endStroke();
         recomposite();
-    } else {
+    }
+    else
+    {
         m_brushEngine->addSample(ev.sample);
         if (m_index % 4 == 0)
             recomposite();
@@ -264,45 +269,47 @@ void PlaybackWindow::fireEvent()
     scheduleNext();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 void PlaybackWindow::scheduleNext()
 {
     if (m_stopped) return;
 
-    if (m_index >= m_events.size()) {
+    if (m_index >= m_events.size())
+    {
         QTimer::singleShot(0, this, &PlaybackWindow::fireEvent);
         return;
     }
-    // Fix: safe delay calculation
-    qint64 prev = (m_index > 0) ? m_events[m_index - 1].timestampMs : 0;
-    qint64 next = m_events[m_index].timestampMs;
-    int delay   = static_cast<int>(qMax(0LL, next - prev) / m_speed);
-    delay       = qMin(delay, 500);   // cap at 500ms to avoid hanging on long pauses
+
+    const qint64 prev  = (m_index > 0) ? m_events[m_index - 1].timestampMs : 0;
+    const qint64 next  = m_events[m_index].timestampMs;
+    int delay = static_cast<int>(qMax(0LL, next - prev) / m_speed);
+    delay     = qMin(delay, 500);   // cap at 500 ms to avoid hanging on long pauses
     QTimer::singleShot(delay, this, &PlaybackWindow::fireEvent);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Save Recording
+// Save recording  –  PNG sequence or MP4 via ffmpeg
 // ─────────────────────────────────────────────────────────────────────────────
+
 void PlaybackWindow::saveRecording()
 {
-    if (m_frames.isEmpty()) {
+    if (m_frames.isEmpty())
+    {
         QMessageBox::warning(this, tr("No Frames"),
             tr("Play back the recording first to capture frames."));
         return;
     }
 
-    // Ask what format to save
     QMessageBox fmt(this);
     fmt.setWindowTitle(tr("Save Speedpaint"));
     fmt.setText(tr("How would you like to save the speedpaint?"));
     auto *pngBtn = fmt.addButton(tr("PNG Frames"), QMessageBox::AcceptRole);
-    auto *mp4Btn = fmt.addButton(tr("MP4 Video"), QMessageBox::AcceptRole);
+    auto *mp4Btn = fmt.addButton(tr("MP4 Video"),  QMessageBox::AcceptRole);
     fmt.addButton(QMessageBox::Cancel);
     fmt.exec();
 
-    if (fmt.clickedButton() == pngBtn) {
-        // ── Save PNG sequence ─────────────────────────────────────────────────
+    if (fmt.clickedButton() == pngBtn)
+    {
+        // ── PNG sequence ──────────────────────────────────────────────────────
         const QString dir = QFileDialog::getExistingDirectory(this,
             tr("Choose folder to save PNG frames"),
             QStandardPaths::writableLocation(QStandardPaths::PicturesLocation));
@@ -315,25 +322,26 @@ void PlaybackWindow::saveRecording()
         QProgressDialog prog(tr("Saving frames…"), tr("Cancel"), 0, m_frames.size(), this);
         prog.setWindowModality(Qt::WindowModal);
 
-        for (int i = 0; i < m_frames.size(); ++i) {
+        for (int i = 0; i < m_frames.size(); ++i)
+        {
             prog.setValue(i);
             QApplication::processEvents();
             if (prog.wasCanceled()) break;
-            const QString path = folder + QString("/frame_%1.png").arg(i, 5, 10, QChar('0'));
-            m_frames[i].save(path, "PNG");
+            m_frames[i].save(folder + QString("/frame_%1.png").arg(i, 5, 10, QChar('0')), "PNG");
         }
         prog.setValue(m_frames.size());
 
         QMessageBox::information(this, tr("Saved"),
             tr("Saved %1 frames to:\n%2").arg(m_frames.size()).arg(folder));
-
-    } else if (fmt.clickedButton() == mp4Btn) {
-        // ── Save MP4 via ffmpeg ───────────────────────────────────────────────
-        // Check ffmpeg is available
+    }
+    else if (fmt.clickedButton() == mp4Btn)
+    {
+        // ── MP4 via ffmpeg ────────────────────────────────────────────────────
         QProcess check;
         check.start("ffmpeg", {"-version"});
         check.waitForFinished(3000);
-        if (check.exitCode() != 0) {
+        if (check.exitCode() != 0)
+        {
             QMessageBox::warning(this, tr("ffmpeg not found"),
                 tr("ffmpeg is required to export MP4.\n\n"
                    "Install it with:\n  sudo apt install ffmpeg\n\n"
@@ -348,14 +356,15 @@ void PlaybackWindow::saveRecording()
             tr("MP4 Video (*.mp4)"));
         if (savePath.isEmpty()) return;
 
-        // Write frames to a temp folder
+        // Write frames to a temporary folder.
         const QString tmpDir = QDir::tempPath() + "/pixelcanvas_export";
         QDir().mkpath(tmpDir);
 
         QProgressDialog prog(tr("Preparing frames…"), tr("Cancel"), 0, m_frames.size(), this);
         prog.setWindowModality(Qt::WindowModal);
 
-        for (int i = 0; i < m_frames.size(); ++i) {
+        for (int i = 0; i < m_frames.size(); ++i)
+        {
             prog.setValue(i);
             QApplication::processEvents();
             if (prog.wasCanceled()) { QDir(tmpDir).removeRecursively(); return; }
@@ -366,31 +375,32 @@ void PlaybackWindow::saveRecording()
         prog.setMaximum(0);   // indeterminate while ffmpeg runs
         QApplication::processEvents();
 
-        // Run ffmpeg: 24fps, high quality
+        // 24 fps, high quality (CRF 18).
         QProcess ffmpeg;
         ffmpeg.start("ffmpeg", {
             "-y",
             "-framerate", "24",
-            "-i", tmpDir + "/frame_%05d.png",
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-crf", "18",
+            "-i",         tmpDir + "/frame_%05d.png",
+            "-c:v",       "libx264",
+            "-pix_fmt",   "yuv420p",
+            "-crf",       "18",
             savePath
         });
-        ffmpeg.waitForFinished(300000);   // wait up to 5 minutes
+        ffmpeg.waitForFinished(300000);   // allow up to 5 minutes
 
-        // Clean up temp frames
         QDir(tmpDir).removeRecursively();
-
         prog.reset();
 
-        if (ffmpeg.exitCode() == 0) {
+        if (ffmpeg.exitCode() == 0)
+        {
             QMessageBox::information(this, tr("Saved"),
                 tr("Speedpaint saved to:\n%1").arg(savePath));
-        } else {
+        }
+        else
+        {
             QMessageBox::warning(this, tr("ffmpeg error"),
-                tr("ffmpeg failed:\n%1").arg(
-                    QString::fromUtf8(ffmpeg.readAllStandardError())));
+                tr("ffmpeg failed:\n%1")
+                .arg(QString::fromUtf8(ffmpeg.readAllStandardError())));
         }
     }
 }

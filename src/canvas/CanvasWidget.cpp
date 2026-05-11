@@ -10,7 +10,7 @@
 #include <cmath>
 
 #ifndef M_PI
-#define M_PI 3.14159265358979323846
+#  define M_PI 3.14159265358979323846
 #endif
 
 #include "LayerStack.h"
@@ -20,6 +20,9 @@
 #include "Layer.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Construction / destruction
+// ─────────────────────────────────────────────────────────────────────────────
+
 CanvasWidget::CanvasWidget(LayerStack  *layerStack,
                            BrushEngine *brushEngine,
                            UndoStack   *undoStack,
@@ -39,7 +42,8 @@ CanvasWidget::CanvasWidget(LayerStack  *layerStack,
     m_repaintTimer = new QTimer(this);
     m_repaintTimer->setSingleShot(true);
     m_repaintTimer->setInterval(8);   // 8 ms ≈ 120 fps cap
-    connect(m_repaintTimer, &QTimer::timeout, this, &CanvasWidget::flushPendingDirty);
+    connect(m_repaintTimer, &QTimer::timeout,
+            this,            &CanvasWidget::flushPendingDirty);
 }
 
 CanvasWidget::~CanvasWidget() = default;
@@ -61,9 +65,8 @@ void CanvasWidget::paintGL()
 
     p.setRenderHint(QPainter::SmoothPixmapTransform, m_zoom < 1.0);
 
-    const QPointF canvasCentre(
-        m_composited.width()  * m_zoom * 0.5,
-        m_composited.height() * m_zoom * 0.5);
+    const QPointF canvasCentre(m_composited.width()  * m_zoom * 0.5,
+                                m_composited.height() * m_zoom * 0.5);
 
     p.translate(m_offset + canvasCentre);
     if (m_flipH)             p.scale(-1.0, 1.0);
@@ -73,19 +76,20 @@ void CanvasWidget::paintGL()
 
     p.drawImage(QPointF(0, 0), m_composited);
 
-    // Shift straight-line preview — drawn in canvas space, before border
+    // Shift straight-line preview (canvas space, before the canvas border).
     if (m_shiftLineActive && m_shiftHeld && m_cursorOnCanvas)
     {
         p.setPen(QPen(QColor(100, 160, 255, 160), 1.0 / m_zoom, Qt::DashLine));
         p.drawLine(m_shiftLineStart, widgetToCanvas(m_cursorPos));
     }
 
+    // Canvas border.
     p.setCompositionMode(QPainter::CompositionMode_SourceOver);
     p.setPen(QPen(QColor(0x30, 0x30, 0x30), 1.0 / m_zoom));
     p.setBrush(Qt::NoBrush);
     p.drawRect(QRectF(QPointF(0, 0), QSizeF(m_composited.size())));
 
-    // Brush cursor circle (widget space)
+    // Brush cursor circle (widget space).
     if (m_cursorOnCanvas && !m_spaceHeld && !m_altHeld)
     {
         p.resetTransform();
@@ -96,6 +100,7 @@ void CanvasWidget::paintGL()
         p.setPen(QPen(Qt::white, 1.5));
         p.setBrush(Qt::NoBrush);
         p.drawEllipse(m_cursorPos, r, r);
+
         p.setPen(QPen(Qt::black, 0.75));
         p.drawEllipse(m_cursorPos, r - 1.0f, r - 1.0f);
     }
@@ -107,14 +112,14 @@ void CanvasWidget::paintGL()
 
 QPointF CanvasWidget::widgetToCanvas(const QPointF &wp) const
 {
-    const QPointF canvasCentre(
-        m_composited.width()  * m_zoom * 0.5,
-        m_composited.height() * m_zoom * 0.5);
+    const QPointF canvasCentre(m_composited.width()  * m_zoom * 0.5,
+                                m_composited.height() * m_zoom * 0.5);
     QPointF pt = wp - (m_offset + canvasCentre);
 
     if (m_flipH) pt.setX(-pt.x());
 
-    if (m_rotation != 0.0f) {
+    if (m_rotation != 0.0f)
+    {
         const double rad = -static_cast<double>(m_rotation) * M_PI / 180.0;
         const double c   = std::cos(rad);
         const double s   = std::sin(rad);
@@ -159,22 +164,24 @@ void CanvasWidget::setFlipH(bool flip)
 
 void CanvasWidget::resetView()
 {
-    const QSizeF cs = m_composited.size();
-    const float margin = 40.0f;
-    const float fitZoom = std::min(
+    const QSizeF cs     = m_composited.size();
+    const float  margin = 40.0f;
+    const float  fitZoom = std::min(
         (width()  - margin * 2) / cs.width(),
         (height() - margin * 2) / cs.height());
-    m_zoom = std::clamp(fitZoom, 0.05f, 1.0f);
-    m_offset = QPointF(
-        (width()  - cs.width()  * m_zoom) * 0.5f,
-        (height() - cs.height() * m_zoom) * 0.5f);
+
+    m_zoom   = std::clamp(fitZoom, 0.05f, 1.0f);
+    m_offset = QPointF((width()  - cs.width()  * m_zoom) * 0.5f,
+                       (height() - cs.height() * m_zoom) * 0.5f);
     update();
     emit zoomChanged(m_zoom);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Recomposite — always suspend/resume stroke painter so LayerStack can open
-// its own painter on the same QImage without Qt complaining.
+// Recomposite
+//
+// Always suspend / resume the stroke painter so LayerStack can open its own
+// painter on the same QImage without Qt asserting.
 // ─────────────────────────────────────────────────────────────────────────────
 
 void CanvasWidget::recompositeRect(const QRect &dirty)
@@ -186,19 +193,20 @@ void CanvasWidget::recompositeRect(const QRect &dirty)
 
     m_layerStack->recompositeRect(m_composited, dirty);
 
+    // Overlay the in-progress scratch layer for a correct live preview.
     if (m_drawing && m_brushEngine->hasScratch())
     {
         const QImage *scratch = m_brushEngine->strokeScratch();
         if (scratch && !scratch->isNull())
         {
             const BrushSettings &bs = m_brushEngine->settings();
-            const bool isEraser = bs.tipType == TipType::Eraser ||
-                                  bs.tipType == TipType::SelEraser ||
-                                  bs.blendMode == BrushBlendMode::Erase;
+            const bool isEraser = bs.tipType  == TipType::Eraser
+                               || bs.tipType  == TipType::SelEraser
+                               || bs.blendMode == BrushBlendMode::Erase;
 
             if (isEraser)
             {
-                // Apply erase to a temp copy of the active layer pixels,
+                // Apply the erase to a temp copy of the active layer pixels,
                 // then recomposite that region so the white background shows through.
                 if (Layer *layer = m_layerStack->activeLayer())
                 {
@@ -238,7 +246,7 @@ void CanvasWidget::recompositeRect(const QRect &dirty)
     emit canvasUpdated();
 }
 
-// Called by m_repaintTimer — flushes accumulated dirty rect from stroke dabs.
+// Called by m_repaintTimer — flushes the accumulated dirty rect from stroke dabs.
 void CanvasWidget::flushPendingDirty()
 {
     if (!m_pendingDirty.isEmpty())
@@ -249,7 +257,7 @@ void CanvasWidget::flushPendingDirty()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Bucket fill
+// Bucket fill  –  scanline flood fill
 // ─────────────────────────────────────────────────────────────────────────────
 
 void CanvasWidget::doBucketFill(const QPointF &canvasPos)
@@ -257,53 +265,55 @@ void CanvasWidget::doBucketFill(const QPointF &canvasPos)
     Layer *layer = m_layerStack->activeLayer();
     if (!layer) return;
 
-    QImage &img = layer->pixels;
-    const int W  = img.width();
-    const int H  = img.height();
-    const int x0 = static_cast<int>(canvasPos.x());
-    const int y0 = static_cast<int>(canvasPos.y());
+    QImage   &img = layer->pixels;
+    const int  W  = img.width();
+    const int  H  = img.height();
+    const int  x0 = static_cast<int>(canvasPos.x());
+    const int  y0 = static_cast<int>(canvasPos.y());
     if (x0 < 0 || y0 < 0 || x0 >= W || y0 >= H) return;
 
-    // Read target color directly from scanline (fast, no lock per call)
-    const QRgb target = reinterpret_cast<const QRgb*>(img.constScanLine(y0))[x0];
+    // Read target colour directly from the scanline (fast, no lock per call).
+    const QRgb target = reinterpret_cast<const QRgb *>(img.constScanLine(y0))[x0];
     const QRgb fill   = qPremultiply(m_brushEngine->color().rgba());
     if (target == fill) return;
 
     // Scanline flood fill — processes whole horizontal spans at once,
-    // far fewer stack operations than pixel-by-pixel.
+    // resulting in far fewer stack operations than pixel-by-pixel fills.
     QStack<QPoint> stack;
     stack.push({x0, y0});
 
     while (!stack.isEmpty())
     {
         const QPoint pt = stack.pop();
-        int y = pt.y();
+        const int    y  = pt.y();
         if (y < 0 || y >= H) continue;
 
-        QRgb *row = reinterpret_cast<QRgb*>(img.scanLine(y));
+        QRgb *row = reinterpret_cast<QRgb *>(img.scanLine(y));
 
-        // Walk left from seed
-        int left = pt.x();
-        while (left > 0 && row[left - 1] == target) --left;
-
-        // Walk right from seed
+        // Extend the span left and right from the seed pixel.
+        int left  = pt.x();
         int right = pt.x();
+        while (left  > 0     && row[left  - 1] == target) --left;
         while (right < W - 1 && row[right + 1] == target) ++right;
 
-        // Fill the span
         for (int x = left; x <= right; ++x)
             row[x] = fill;
 
-        // Check spans above and below
-        auto checkRow = [&](int ny) {
+        // Queue any unvisited matching pixels in the rows above and below.
+        auto checkRow = [&](int ny)
+        {
             if (ny < 0 || ny >= H) return;
-            const QRgb *nrow = reinterpret_cast<const QRgb*>(img.constScanLine(ny));
+            const QRgb *nrow = reinterpret_cast<const QRgb *>(img.constScanLine(ny));
             bool inSpan = false;
-            for (int x = left; x <= right; ++x) {
-                if (nrow[x] == target && !inSpan) {
+            for (int x = left; x <= right; ++x)
+            {
+                if (nrow[x] == target && !inSpan)
+                {
                     stack.push({x, ny});
                     inSpan = true;
-                } else if (nrow[x] != target) {
+                }
+                else if (nrow[x] != target)
+                {
                     inSpan = false;
                 }
             }
@@ -323,6 +333,7 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
 {
     if (m_composited.isNull()) return;
 
+    // ── Panning ───────────────────────────────────────────────────────────────
     if (m_spaceHeld || m_middlePanning)
     {
         m_panning        = true;
@@ -331,13 +342,15 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
         return;
     }
 
-    if (m_shiftHeld) {
+    if (m_shiftHeld)
+    {
         m_shiftLineStart  = widgetToCanvas(widgetPos);
         m_shiftLineActive = true;
     }
 
     const TipType tt = m_brushEngine->settings().tipType;
 
+    // ── Bucket fill ───────────────────────────────────────────────────────────
     if (tt == TipType::Bucket)
     {
         if (m_undoStack)
@@ -347,6 +360,7 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
         return;
     }
 
+    // ── Gradient ──────────────────────────────────────────────────────────────
     if (tt == TipType::Gradient)
     {
         m_gradientStart = widgetToCanvas(widgetPos);
@@ -354,6 +368,7 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
         return;
     }
 
+    // ── Selection tools ───────────────────────────────────────────────────────
     if (tt == TipType::SelPen || tt == TipType::SelEraser)
     {
         if (!m_hasSelection || m_selectionMask.size() != m_composited.size())
@@ -365,16 +380,23 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
         m_brushEngine->setActiveLayer(&m_selectionMask);
         m_drawing = true;
         m_brushEngine->beginStroke();
+
         if (m_recordingEnabled)
             m_recorder.recordBegin(m_brushEngine->settings(),
                                    m_brushEngine->color(),
                                    m_layerStack->activeIndex());
+
         StrokeSample s;
-        s.pos = widgetToCanvas(widgetPos); s.pressure = pressure;
-        s.tiltX = tiltX; s.tiltY = tiltY; s.rotation = rotation;
+        s.pos      = widgetToCanvas(widgetPos);
+        s.pressure = pressure;
+        s.tiltX    = tiltX;
+        s.tiltY    = tiltY;
+        s.rotation = rotation;
+
         const QRect dirty = m_brushEngine->addSample(s);
         if (m_recordingEnabled) m_recorder.recordSample(s);
-        if (!dirty.isEmpty()) {
+        if (!dirty.isEmpty())
+        {
             m_pendingDirty = m_pendingDirty.isEmpty() ? dirty : m_pendingDirty.united(dirty);
             if (!m_repaintTimer->isActive()) m_repaintTimer->start();
         }
@@ -382,7 +404,7 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
         return;
     }
 
-    // Normal brush path
+    // ── Normal brush path ─────────────────────────────────────────────────────
     if (m_undoStack)
         m_undoStack->pushSnapshot(m_layerStack->activeIndex(),
                                   m_layerStack->activeLayer()->pixels);
@@ -393,14 +415,18 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
 
     m_drawing = true;
     m_brushEngine->beginStroke();
+
     if (m_recordingEnabled)
         m_recorder.recordBegin(m_brushEngine->settings(),
                                m_brushEngine->color(),
                                m_layerStack->activeIndex());
 
     StrokeSample s;
-    s.pos = widgetToCanvas(widgetPos); s.pressure = pressure;
-    s.tiltX = tiltX; s.tiltY = tiltY; s.rotation = rotation;
+    s.pos      = widgetToCanvas(widgetPos);
+    s.pressure = pressure;
+    s.tiltX    = tiltX;
+    s.tiltY    = tiltY;
+    s.rotation = rotation;
 
     const QRect dirty = m_brushEngine->addSample(s);
     if (m_recordingEnabled) m_recorder.recordSample(s);
@@ -409,6 +435,7 @@ void CanvasWidget::pointerBegin(const QPointF &widgetPos, float pressure,
 
     emit cursorMoved(s.pos, pressure);
 }
+
 void CanvasWidget::pointerUpdate(const QPointF &widgetPos, float pressure,
                                  float tiltX, float tiltY, float rotation)
 {
@@ -422,8 +449,11 @@ void CanvasWidget::pointerUpdate(const QPointF &widgetPos, float pressure,
     if (!m_drawing) return;
 
     StrokeSample s;
-    s.pos = widgetToCanvas(widgetPos); s.pressure = pressure;
-    s.tiltX = tiltX; s.tiltY = tiltY; s.rotation = rotation;
+    s.pos      = widgetToCanvas(widgetPos);
+    s.pressure = pressure;
+    s.tiltX    = tiltX;
+    s.tiltY    = tiltY;
+    s.rotation = rotation;
 
     const QRect dirty = m_brushEngine->addSample(s);
     if (m_recordingEnabled) m_recorder.recordSample(s);
@@ -433,13 +463,13 @@ void CanvasWidget::pointerUpdate(const QPointF &widgetPos, float pressure,
         if (!m_repaintTimer->isActive())
             m_repaintTimer->start();
     }
-
     emit cursorMoved(s.pos, pressure);
 }
 
 void CanvasWidget::pointerEnd()
 {
     if (m_panning) { m_panning = false; return; }
+
     if (m_drawing)
     {
         m_repaintTimer->stop();
@@ -447,6 +477,7 @@ void CanvasWidget::pointerEnd()
 
         const TipType tt = m_brushEngine->settings().tipType;
 
+        // ── Gradient: draw on release ─────────────────────────────────────────
         if (tt == TipType::Gradient)
         {
             Layer *layer = m_layerStack->activeLayer();
@@ -471,15 +502,17 @@ void CanvasWidget::pointerEnd()
             QRect dirty;
             if (m_shiftLineActive && m_shiftHeld)
             {
-                // Cancel the in-progress stroke and replace it with a
-                // clean straight line from the shift anchor to the cursor.
+                // Cancel the in-progress stroke and replace it with a clean
+                // straight line from the shift anchor to the cursor.
                 m_brushEngine->endStroke();   // discard accumulated dabs
 
                 const QPointF end = widgetToCanvas(m_cursorPos);
                 StrokeSample s0, s1;
-                s0.pos      = m_shiftLineStart; s0.pressure = 1.0f;
-                s1.pos      = end;              s1.pressure = 1.0f;
-                Stroke line; line << s0 << s1;
+                s0.pos = m_shiftLineStart; s0.pressure = 1.0f;
+                s1.pos = end;              s1.pressure = 1.0f;
+
+                Stroke line;
+                line << s0 << s1;
                 dirty = m_brushEngine->renderStroke(line);
                 m_shiftLineActive = false;
             }
@@ -525,29 +558,37 @@ void CanvasWidget::tabletEvent(QTabletEvent *e)
     case QEvent::TabletPress:
         m_tabletInUse = true;
         m_cursorPos   = e->position();
-        if (e->button() == Qt::RightButton) {
+        if (e->button() == Qt::RightButton)
+        {
+            // Eyedropper: pick colour from the composited image.
             const QPointF cp = widgetToCanvas(e->position());
             const int x = static_cast<int>(cp.x());
             const int y = static_cast<int>(cp.y());
-            if (m_composited.rect().contains(x, y)) {
-                const QRgb px = reinterpret_cast<const QRgb *>(
-                    m_composited.constScanLine(y))[x];
-                m_brushEngine->setColor(QColor(qUnpremultiply(px)));
-                emit colorPicked(QColor(qUnpremultiply(px)));
+            if (m_composited.rect().contains(x, y))
+            {
+                const QRgb   px     = reinterpret_cast<const QRgb *>(m_composited.constScanLine(y))[x];
+                const QColor picked = QColor(qUnpremultiply(px));
+                m_brushEngine->setColor(picked);
+                emit colorPicked(picked);
             }
-        } else {
+        }
+        else
+        {
             pointerBegin(e->position(), pressure, tiltX, tiltY, rot);
         }
         break;
+
     case QEvent::TabletMove:
         m_cursorPos = e->position();
         pointerUpdate(e->position(), pressure, tiltX, tiltY, rot);
         update();
         break;
+
     case QEvent::TabletRelease:
         pointerEnd();
         m_tabletInUse = false;
         break;
+
     default: break;
     }
 }
@@ -559,25 +600,30 @@ void CanvasWidget::tabletEvent(QTabletEvent *e)
 void CanvasWidget::mousePressEvent(QMouseEvent *e)
 {
     if (m_tabletInUse) return;
-    if (e->button() == Qt::MiddleButton) {
+
+    if (e->button() == Qt::MiddleButton)
+    {
         m_middlePanning = true;
         pointerBegin(e->position(), 1.0f, 0.f, 0.f, 0.f);
         return;
     }
-    if (e->button() == Qt::RightButton) {
-        // Eyedropper: pick color from composited image
+
+    if (e->button() == Qt::RightButton)
+    {
+        // Eyedropper: pick colour from the composited image.
         const QPointF cp = widgetToCanvas(e->position());
         const int x = static_cast<int>(cp.x());
         const int y = static_cast<int>(cp.y());
-        if (m_composited.rect().contains(x, y)) {
-            const QRgb px = reinterpret_cast<const QRgb *>(
-                m_composited.constScanLine(y))[x];
+        if (m_composited.rect().contains(x, y))
+        {
+            const QRgb   px     = reinterpret_cast<const QRgb *>(m_composited.constScanLine(y))[x];
             const QColor picked = QColor(qUnpremultiply(px));
             m_brushEngine->setColor(picked);
             emit colorPicked(picked);
         }
         return;
     }
+
     if (e->button() == Qt::LeftButton)
         pointerBegin(e->position(), 1.0f, 0.f, 0.f, 0.f);
 }
@@ -626,9 +672,9 @@ void CanvasWidget::wheelEvent(QWheelEvent *e)
     if (e->modifiers() & Qt::ControlModifier)
     {
         e->accept();
-        const float delta  = e->angleDelta().y() / 120.0f;
-        const float factor = std::pow(1.15f, delta);
-        const QPointF pivot = e->position();
+        const float   delta  = e->angleDelta().y() / 120.0f;
+        const float   factor = std::pow(1.15f, delta);
+        const QPointF pivot  = e->position();
         m_offset = pivot + (m_offset - pivot) * factor;
         setZoom(m_zoom * factor);
     }
@@ -650,22 +696,37 @@ void CanvasWidget::keyPressEvent(QKeyEvent *e)
     case Qt::Key_Space:
         if (!e->isAutoRepeat()) { m_spaceHeld = true; setCursor(Qt::OpenHandCursor); }
         break;
+
     case Qt::Key_Alt:
-        m_altHeld = true; setCursor(Qt::CrossCursor);
+        m_altHeld = true;
+        setCursor(Qt::CrossCursor);
         break;
-    case Qt::Key_BracketLeft: {
+
+    case Qt::Key_BracketLeft:
+    {
         BrushSettings s = m_brushEngine->settings();
         s.size = std::max(1.0f, s.size - 2.0f);
-        m_brushEngine->setSettings(s); update(); break; }
-    case Qt::Key_BracketRight: {
+        m_brushEngine->setSettings(s);
+        update();
+        break;
+    }
+
+    case Qt::Key_BracketRight:
+    {
         BrushSettings s = m_brushEngine->settings();
         s.size = std::min(500.0f, s.size + 2.0f);
-        m_brushEngine->setSettings(s); update(); break; }
+        m_brushEngine->setSettings(s);
+        update();
+        break;
+    }
+
     case Qt::Key_Shift:
         if (!e->isAutoRepeat()) m_shiftHeld = true;
         break;
+
     default:
-        QOpenGLWidget::keyPressEvent(e); break;
+        QOpenGLWidget::keyPressEvent(e);
+        break;
     }
 }
 
@@ -676,18 +737,24 @@ void CanvasWidget::keyReleaseEvent(QKeyEvent *e)
     case Qt::Key_Space:
         if (!e->isAutoRepeat()) { m_spaceHeld = false; setCursor(Qt::BlankCursor); }
         break;
+
     case Qt::Key_Alt:
-        m_altHeld = false; setCursor(Qt::BlankCursor);
+        m_altHeld = false;
+        setCursor(Qt::BlankCursor);
         break;
+
     case Qt::Key_Shift:
-    if (!e->isAutoRepeat()) {
-        m_shiftHeld       = false;
-        m_shiftLineActive = false;
-        update();
-    }
-    break;
+        if (!e->isAutoRepeat())
+        {
+            m_shiftHeld       = false;
+            m_shiftLineActive = false;
+            update();
+        }
+        break;
+
     default:
-        QOpenGLWidget::keyReleaseEvent(e); break;
+        QOpenGLWidget::keyReleaseEvent(e);
+        break;
     }
 }
 
@@ -716,9 +783,12 @@ void CanvasWidget::reinitCanvas()
     const QSize newSize = m_layerStack->canvasSize();
     m_composited = QImage(newSize, QImage::Format_ARGB32_Premultiplied);
     m_composited.fill(Qt::white);
+
     if (Layer *l = m_layerStack->activeLayer())
         m_brushEngine->setActiveLayer(&l->pixels);
+
     if (m_undoStack) m_undoStack->clear();
+
     m_dirty = false;
     recompositeRect(m_composited.rect());
     resetView();

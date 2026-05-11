@@ -21,7 +21,10 @@
 #include "LayerStack.h"
 #include "CanvasWidget.h"
 
-// ── New canvas ────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// New canvas
+// ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onNewCanvas()
 {
     if (!maybeSave()) return;
@@ -33,11 +36,11 @@ void MainWindow::onNewCanvas()
     auto *form = new QGridLayout(&dlg);
     form->setColumnStretch(1, 1);
 
-    auto *wSpin = new QSpinBox(&dlg);
-    wSpin->setRange(1, 16384); wSpin->setValue(512); wSpin->setSuffix(" px");
+    auto *wSpin   = new QSpinBox(&dlg);
+    wSpin->setRange(1, 16384); wSpin->setValue(512);  wSpin->setSuffix(" px");
 
-    auto *hSpin = new QSpinBox(&dlg);
-    hSpin->setRange(1, 16384); hSpin->setValue(512); hSpin->setSuffix(" px");
+    auto *hSpin   = new QSpinBox(&dlg);
+    hSpin->setRange(1, 16384); hSpin->setValue(512);  hSpin->setSuffix(" px");
 
     auto *dpiSpin = new QSpinBox(&dlg);
     dpiSpin->setRange(72, 1200); dpiSpin->setValue(96); dpiSpin->setSuffix(" dpi");
@@ -46,8 +49,7 @@ void MainWindow::onNewCanvas()
     form->addWidget(new QLabel(tr("Height:"),     &dlg), 1, 0); form->addWidget(hSpin,   1, 1);
     form->addWidget(new QLabel(tr("Resolution:"), &dlg), 2, 0); form->addWidget(dpiSpin, 2, 1);
 
-    auto *buttons = new QDialogButtonBox(
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
     form->addWidget(buttons, 3, 0, 1, 2);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -62,7 +64,10 @@ void MainWindow::onNewCanvas()
                        .arg(newSize.width()).arg(newSize.height()));
 }
 
-// ── Resize canvas ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Resize canvas
+// ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onCanvasResize()
 {
     const QSize cur = m_layerStack->canvasSize();
@@ -89,23 +94,25 @@ void MainWindow::onCanvasResize()
     auto *bg          = new QButtonGroup(&dlg);
 
     const char *labels[3][3] = {
-        {"↖", "↑", "↗"},
-        {"←", "·", "→"},
-        {"↙", "↓", "↘"}
+        { "↖", "↑", "↗" },
+        { "←", "·", "→" },
+        { "↙", "↓", "↘" }
     };
     QRadioButton *btns[3][3];
     for (int r = 0; r < 3; ++r)
-        for (int c = 0; c < 3; ++c) {
+    {
+        for (int c = 0; c < 3; ++c)
+        {
             btns[r][c] = new QRadioButton(tr(labels[r][c]), anchorGroup);
             btns[r][c]->setFixedSize(36, 28);
             ag->addWidget(btns[r][c], r, c);
             bg->addButton(btns[r][c], r * 3 + c);
         }
+    }
     btns[0][0]->setChecked(true);
     form->addWidget(anchorGroup, 2, 0, 1, 2);
 
-    auto *buttons = new QDialogButtonBox(
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
     form->addWidget(buttons, 3, 0, 1, 2);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -125,7 +132,10 @@ void MainWindow::onCanvasResize()
     m_canvas->reinitCanvas();
 }
 
-// ── Extend canvas ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Extend canvas
+// ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onCanvasExtend()
 {
     QDialog dlg(this);
@@ -135,7 +145,8 @@ void MainWindow::onCanvasExtend()
     auto *form = new QGridLayout(&dlg);
     form->setColumnStretch(1, 1);
 
-    auto makeSpin = [&](QWidget *parent) {
+    auto makeSpin = [&](QWidget *parent)
+    {
         auto *s = new QSpinBox(parent);
         s->setRange(0, 8192); s->setValue(0); s->setSuffix(" px");
         return s;
@@ -151,23 +162,25 @@ void MainWindow::onCanvasExtend()
     form->addWidget(new QLabel(tr("Left:"),   &dlg), 2, 0); form->addWidget(leftSpin,   2, 1);
     form->addWidget(new QLabel(tr("Right:"),  &dlg), 3, 0); form->addWidget(rightSpin,  3, 1);
 
-    auto *buttons = new QDialogButtonBox(
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
     form->addWidget(buttons, 4, 0, 1, 2);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
 
     if (dlg.exec() != QDialog::Accepted) return;
 
-    const int l = leftSpin->value(),  t = topSpin->value(),
-              r = rightSpin->value(), b = bottomSpin->value();
+    const int l = leftSpin->value(),  t = topSpin->value();
+    const int r = rightSpin->value(), b = bottomSpin->value();
     if (l + t + r + b == 0) return;
 
     m_layerStack->extendCanvas(l, t, r, b);
     m_canvas->reinitCanvas();
 }
 
-// ── Crop canvas ───────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Crop canvas
+// ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onCanvasCrop()
 {
     const QSize cur = m_layerStack->canvasSize();
@@ -180,7 +193,7 @@ void MainWindow::onCanvasCrop()
     form->setColumnStretch(1, 1);
 
     auto *xSpin = new QSpinBox(&dlg);
-    xSpin->setRange(0, cur.width() - 1);  xSpin->setValue(0); xSpin->setSuffix(" px");
+    xSpin->setRange(0, cur.width()  - 1); xSpin->setValue(0); xSpin->setSuffix(" px");
 
     auto *ySpin = new QSpinBox(&dlg);
     ySpin->setRange(0, cur.height() - 1); ySpin->setValue(0); ySpin->setSuffix(" px");
@@ -203,19 +216,21 @@ void MainWindow::onCanvasCrop()
     form->addWidget(new QLabel(tr("Width:"),    &dlg), 2, 0); form->addWidget(wSpin, 2, 1);
     form->addWidget(new QLabel(tr("Height:"),   &dlg), 3, 0); form->addWidget(hSpin, 3, 1);
 
-    auto *buttons = new QDialogButtonBox(
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
     form->addWidget(buttons, 4, 0, 1, 2);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
 
     if (dlg.exec() != QDialog::Accepted) return;
 
-    const QSize  newSize(wSpin->value(), hSpin->value());
-    const QPoint origin(-xSpin->value(), -ySpin->value());
+    const QSize  newSize(-xSpin->value(), -ySpin->value());   // origin anchor
+    const QPoint origin(wSpin->value(), hSpin->value());
 
-    if (newSize == cur && origin.isNull()) return;
+    if (QSize(wSpin->value(), hSpin->value()) == cur
+        && QPoint(-xSpin->value(), -ySpin->value()).isNull())
+        return;
 
-    m_layerStack->resizeCanvas(newSize, origin);
+    m_layerStack->resizeCanvas(QSize(wSpin->value(), hSpin->value()),
+                               QPoint(-xSpin->value(), -ySpin->value()));
     m_canvas->reinitCanvas();
 }

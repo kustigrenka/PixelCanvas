@@ -13,9 +13,11 @@
 #include <QDockWidget>
 #include <QScrollArea>
 #include <QSettings>
+
 // ─────────────────────────────────────────────────────────────────────────────
-// AccordionSection
+// AccordionSection  –  collapsible panel with animated height transition
 // ─────────────────────────────────────────────────────────────────────────────
+
 class AccordionSection : public QWidget
 {
     Q_OBJECT
@@ -24,7 +26,8 @@ class AccordionSection : public QWidget
 public:
     AccordionSection(const QString &title, QWidget *content,
                      bool startOpen, QWidget *parent = nullptr)
-        : QWidget(parent), m_content(content)
+        : QWidget(parent)
+        , m_content(content)
     {
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
@@ -32,7 +35,7 @@ public:
         lay->setContentsMargins(0, 0, 0, 0);
         lay->setSpacing(0);
 
-        // ── Header ────────────────────────────────────────────────────────────
+        // ── Header button ─────────────────────────────────────────────────────
         m_btn = new QToolButton(this);
         m_btn->setCheckable(true);
         m_btn->setChecked(startOpen);
@@ -51,7 +54,7 @@ public:
             "QToolButton:checked { background:#2e3a4e; color:#a8c8f0; }"
         );
 
-        // ── Container ─────────────────────────────────────────────────────────
+        // ── Content container ─────────────────────────────────────────────────
         m_container = new QWidget(this);
         m_container->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         m_container->setMinimumHeight(0);
@@ -74,17 +77,20 @@ public:
         lay->addWidget(m_container);
         lay->addWidget(sep);
 
-        // ── Animation ─────────────────────────────────────────────────────────
+        // ── Slide animation ───────────────────────────────────────────────────
         m_anim = new QPropertyAnimation(this, "contentHeight", this);
         m_anim->setDuration(100);
         m_anim->setEasingCurve(QEasingCurve::InOutQuad);
 
-        connect(m_btn, &QToolButton::toggled, this, &AccordionSection::toggle);
-
-        connect(m_anim, &QPropertyAnimation::finished, this, [this]() {
+        connect(m_btn,  &QToolButton::toggled, this, &AccordionSection::toggle);
+        connect(m_anim, &QPropertyAnimation::finished, this, [this]()
+        {
+            // Ask the parent dock to adjust its size after animation completes.
             QWidget *w = parentWidget();
-            while (w) {
-                if (auto *dock = qobject_cast<QDockWidget *>(w)) {
+            while (w)
+            {
+                if (auto *dock = qobject_cast<QDockWidget *>(w))
+                {
                     dock->adjustSize();
                     break;
                 }
@@ -104,7 +110,8 @@ public:
     void toggle(bool open)
     {
         m_btn->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
-        if (open) {
+        if (open)
+        {
             const int n = naturalHeight();
             if (n > 20) m_naturalH = n;
         }
@@ -135,6 +142,7 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 // ColorPanelWidget
 // ─────────────────────────────────────────────────────────────────────────────
+
 ColorPanelWidget::ColorPanelWidget(QWidget *parent)
     : QWidget(parent)
 {
@@ -149,10 +157,10 @@ ColorPanelWidget::ColorPanelWidget(QWidget *parent)
     m_wheel->setMinimumSize(180, 180);
 
     m_sliders->setMinimumHeight(140);
-    // Prevent sliders from demanding more width than the dock provides
+    // Prevent sliders from demanding more width than the dock provides.
     m_sliders->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
 
-    // Swatches: Expanding width so it fills the dock and reflows columns,
+    // Swatches: Expanding width so it fills the dock and reflows columns;
     // Fixed height so the accordion knows exactly how tall it is.
     m_swatches->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
@@ -163,22 +171,19 @@ ColorPanelWidget::ColorPanelWidget(QWidget *parent)
     lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(0);
 
-    lay->addWidget(new AccordionSection(tr("  ◎  Color Wheel"), m_wheel,    true,  this));
-    lay->addWidget(new AccordionSection(tr("  ≡  RGB / HSV"),   m_sliders,  false, this));
+    lay->addWidget(new AccordionSection(tr("  ◎  Color Wheel"), m_wheel,   true,  this));
+    lay->addWidget(new AccordionSection(tr("  ≡  RGB / HSV"),   m_sliders, false, this));
+
+    // Swatches accordion wraps a scroll area + quick-add button.
     auto *swatchScroll = new QScrollArea(this);
     swatchScroll->setWidget(m_swatches);
     swatchScroll->setWidgetResizable(true);
     swatchScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     swatchScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     swatchScroll->setFrameShape(QFrame::NoFrame);
-    swatchScroll->setFixedHeight(5 * (22 + 2) + 2 * 4);  // 5 visible rows
+    swatchScroll->setFixedHeight(5 * (22 + 2) + 2 * 4);   // 5 visible rows
 
-    // Quick-add button: adds current color to first empty swatch slot
-    auto *swatchContainer = new QWidget(this);
-    auto *scLay = new QVBoxLayout(swatchContainer);
-    scLay->setContentsMargins(0,0,0,0);
-    scLay->setSpacing(2);
-    auto *addBtn = new QToolButton(swatchContainer);
+    auto *addBtn = new QToolButton(this);
     addBtn->setText("+ Add Color");
     addBtn->setToolTip("Add current color to first empty swatch slot");
     addBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -186,10 +191,13 @@ ColorPanelWidget::ColorPanelWidget(QWidget *parent)
     addBtn->setStyleSheet(
         "QToolButton { background:#2a2a2a; color:#aaa; border:none; font-size:10px; }"
         "QToolButton:hover { background:#3a3a3a; color:#fff; }");
-    connect(addBtn, &QToolButton::clicked, this, [this]() {
+    connect(addBtn, &QToolButton::clicked, this, [this]()
+    {
         QVector<QColor> sw = m_swatches->swatches();
-        for (int i = 0; i < sw.size(); ++i) {
-            if (!sw[i].isValid()) {
+        for (int i = 0; i < sw.size(); ++i)
+        {
+            if (!sw[i].isValid())
+            {
                 sw[i] = color();
                 m_swatches->setSwatches(sw);
                 m_swatches->saveSwatches();
@@ -197,11 +205,16 @@ ColorPanelWidget::ColorPanelWidget(QWidget *parent)
             }
         }
     });
+
+    auto *swatchContainer = new QWidget(this);
+    auto *scLay = new QVBoxLayout(swatchContainer);
+    scLay->setContentsMargins(0, 0, 0, 0);
+    scLay->setSpacing(2);
     scLay->addWidget(swatchScroll);
     scLay->addWidget(addBtn);
 
-    lay->addWidget(new AccordionSection(tr("  ▦  Swatches"), swatchContainer, false, this));
-    lay->addWidget(new AccordionSection(tr("  ✏  Scratch Pad"), m_scratch,  false, this));
+    lay->addWidget(new AccordionSection(tr("  ▦  Swatches"),    swatchContainer, false, this));
+    lay->addWidget(new AccordionSection(tr("  ✏  Scratch Pad"), m_scratch,       false, this));
     lay->addStretch(1);
 
     connect(m_wheel,    &ColorWheelWidget::colorChanged,   this, [this](const QColor &c){ syncColor(c, m_wheel);    });
@@ -209,12 +222,13 @@ ColorPanelWidget::ColorPanelWidget(QWidget *parent)
     connect(m_swatches, &ColorSwatchWidget::colorChanged,  this, [this](const QColor &c){ syncColor(c, m_swatches); });
     connect(m_scratch,  &ScratchPadWidget::colorPicked,    this, [this](const QColor &c){ syncColor(c, m_scratch);  });
 
-    // Restore last used color
+    // Restore last used colour.
     QSettings s("PixelCanvas", "PixelCanvas");
     const QColor saved(s.value("lastColor", "#ff000000").toString());
     if (saved.isValid())
         setColor(saved);
 }
+
 QColor ColorPanelWidget::color() const { return m_wheel->color(); }
 
 void ColorPanelWidget::setBrushEngine(BrushEngine *engine)
@@ -237,8 +251,10 @@ void ColorPanelWidget::syncColor(const QColor &c, QObject *source)
     if (source != m_sliders)  { QSignalBlocker b(m_sliders);  m_sliders->setColor(c);  }
     if (source != m_swatches) { QSignalBlocker b(m_swatches); m_swatches->setColor(c); }
     m_scratch->setColor(c);
+
     emit colorChanged(c);
-    // Save last used color
+
+    // Persist last used colour.
     QSettings s("PixelCanvas", "PixelCanvas");
     s.setValue("lastColor", c.name(QColor::HexArgb));
     s.sync();

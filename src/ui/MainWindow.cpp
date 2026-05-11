@@ -2,11 +2,11 @@
 // MainWindow.cpp  –  core wiring: constructor, menu bar, quick bar,
 //                    status bar, signal connections, undo/redo, file I/O.
 //
-// The following groups live in their own translation units to keep this file
-// focused:
-//   MainWindowDocks.cpp   – buildDocks() + buildNavigator/Color/Brush/Preview
-//   MainWindowFilters.cpp – onFilterBlur/BrightnessContrast/Invert/Sharpen
+// Related translation units:
+//   MainWindowDocks.cpp   – buildDocks() + buildNavigator/Color/Brush
 //   MainWindowCanvas.cpp  – onNewCanvas/CanvasResize/CanvasExtend/CanvasCrop
+//   MainWindowFilters.cpp – onFilterBlur/BrightnessContrast/Invert/Sharpen
+//   MainWindowPlayback.cpp – onToggleRecording/onPlayback
 // ─────────────────────────────────────────────────────────────────────────────
 #include "MainWindow.h"
 
@@ -26,7 +26,6 @@
 #include <QSettings>
 #include <QCloseEvent>
 
-
 #include "CanvasWidget.h"
 #include "ToolbarPanel.h"
 #include "LayerPanel.h"
@@ -40,6 +39,10 @@
 #include "PinterestWindow.h"
 #include "MannequinWindow.h"
 #include "../GoogleDrive/GoogleDriveClient.h"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Construction / destruction
+// ─────────────────────────────────────────────────────────────────────────────
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -66,9 +69,11 @@ MainWindow::MainWindow(QWidget *parent)
     buildMenuBar();
     buildQuickBar();
     buildDocks();
+
     QSettings s("YourOrg", "YourApp");
     restoreGeometry(s.value("window/geometry").toByteArray());
-    restoreState(s.value("window/state").toByteArray());        // defined in MainWindowDocks.cpp
+    restoreState(s.value("window/state").toByteArray());
+
     buildStatusBar();
     connectSignals();
     applyShortcuts();
@@ -79,35 +84,32 @@ MainWindow::~MainWindow() = default;
 // ─────────────────────────────────────────────────────────────────────────────
 // Menu bar  –  File · Edit · View · Layer · Canvas · Filter · Window · Help
 // ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::buildMenuBar()
 {
     // ── File ──────────────────────────────────────────────────────────────────
     auto *file = menuBar()->addMenu(tr("&File"));
-    file->addAction(tr("&New"),          this, &MainWindow::onNewCanvas,   QKeySequence::New);
-    file->addAction(tr("&Open…"),        this, &MainWindow::onOpen,        QKeySequence::Open);
-    file->addAction(tr("&Import Image…"), this, &MainWindow::onImportPng,
+    file->addAction(tr("&New"),            this, &MainWindow::onNewCanvas,  QKeySequence::New);
+    file->addAction(tr("&Open…"),          this, &MainWindow::onOpen,       QKeySequence::Open);
+    file->addAction(tr("&Import Image…"),  this, &MainWindow::onImportPng,
                     QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
     file->addSeparator();
-    file->addAction(tr("&Save"),         this, &MainWindow::onSave,        QKeySequence::Save);
-    file->addAction(tr("Save &As…"),     this, &MainWindow::onSaveAs,      QKeySequence::SaveAs);
-    file->addAction(tr("&Export Flat…"), this, &MainWindow::onExportFlat,
+    file->addAction(tr("&Save"),           this, &MainWindow::onSave,       QKeySequence::Save);
+    file->addAction(tr("Save &As…"),       this, &MainWindow::onSaveAs,     QKeySequence::SaveAs);
+    file->addAction(tr("&Export Flat…"),   this, &MainWindow::onExportFlat,
                     QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
-    file->addAction(tr("&Import Image…"), this, &MainWindow::onImportPng,
-                    QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I));
-                    
     file->addSeparator();
-    file->addAction(tr("&Quit"), this, &QWidget::close, QKeySequence::Quit);
+    file->addAction(tr("&Quit"),           this, &QWidget::close,           QKeySequence::Quit);
     file->addSeparator();
     m_driveAction = file->addAction(tr("☁  Save to Google Drive"),
-                                this, &MainWindow::onUploadToDrive);
-    
-                                
+                                    this, &MainWindow::onUploadToDrive);
+
     // ── Edit ──────────────────────────────────────────────────────────────────
-    auto *edit = menuBar()->addMenu(tr("&Edit"));
+    auto *edit   = menuBar()->addMenu(tr("&Edit"));
     m_undoAction = edit->addAction(tr("&Undo"), this, &MainWindow::onUndo, QKeySequence::Undo);
     m_redoAction = edit->addAction(tr("&Redo"), this, &MainWindow::onRedo);
-    m_redoAction->setShortcuts({QKeySequence(Qt::CTRL | Qt::Key_Y),
-                                QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z)});
+    m_redoAction->setShortcuts({ QKeySequence(Qt::CTRL | Qt::Key_Y),
+                                  QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z) });
     m_undoAction->setEnabled(false);
     m_redoAction->setEnabled(false);
 
@@ -155,7 +157,8 @@ void MainWindow::buildMenuBar()
     // ── References ────────────────────────────────────────────────────────────
     auto *references = menuBar()->addMenu(tr("&References"));
 
-    references->addAction(tr("⬡  Open Pinterest…"), this, [this]() {
+    references->addAction(tr("⬡  Open Pinterest…"), this, [this]()
+    {
         if (!m_pinterestWin)
             m_pinterestWin = new PinterestWindow(this);
         m_pinterestWin->show();
@@ -163,7 +166,8 @@ void MainWindow::buildMenuBar()
         m_pinterestWin->activateWindow();
     });
 
-    references->addAction(tr("◈  Open Pose Reference (PoseMy.Art)…"), this, [this]() {
+    references->addAction(tr("◈  Open Pose Reference (PoseMy.Art)…"), this, [this]()
+    {
         if (!m_mannequinWin)
             m_mannequinWin = new MannequinWindow(this, "https://posemy.art/");
         m_mannequinWin->show();
@@ -173,22 +177,23 @@ void MainWindow::buildMenuBar()
 
     references->addSeparator();
 
-    references->addAction(tr("Close Pinterest"), this, [this]() {
+    references->addAction(tr("Close Pinterest"), this, [this]()
+    {
         if (m_pinterestWin && m_pinterestWin->isVisible())
             m_pinterestWin->hide();
     });
 
-    references->addAction(tr("Close Mannequins"), this, [this]() {
+    references->addAction(tr("Close Mannequins"), this, [this]()
+    {
         if (m_mannequinWin && m_mannequinWin->isVisible())
             m_mannequinWin->hide();
     });
 
-    // ── Window (dock toggles added later in buildDocks) ────────────────────
+    // ── Window  (dock toggles added later in buildDocks) ──────────────────────
     menuBar()->addMenu(tr("&Window"));
 
-    // playback
-
-    QMenu *playbackMenu = menuBar()->addMenu(tr("&Playback"));
+    // ── Playback ──────────────────────────────────────────────────────────────
+    auto *playbackMenu  = menuBar()->addMenu(tr("&Playback"));
     m_recordAction = playbackMenu->addAction(tr("⏺  Start Recording"));
     m_recordAction->setCheckable(true);
     m_recordAction->setShortcut(QKeySequence(tr("Ctrl+Shift+R")));
@@ -204,8 +209,9 @@ void MainWindow::buildMenuBar()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Quick bar  –  Undo/Redo · Flip H · Zoom% · Stabilizer S-0…S-7
+// Quick bar  –  Undo/Redo · History slider · Flip H · Zoom% · Stabilizer
 // ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::buildQuickBar()
 {
     m_quickBar = new QToolBar(tr("Quick Bar"), this);
@@ -216,24 +222,23 @@ void MainWindow::buildQuickBar()
     m_quickBar->addAction(tr("↩ Undo"), this, &MainWindow::onUndo);
     m_quickBar->addAction(tr("↪ Redo"), this, &MainWindow::onRedo);
     m_quickBar->addSeparator();
-    m_quickBar->addSeparator();
 
-    auto *histLabel = new QLabel(tr(" History:"), this);
-    m_quickBar->addWidget(histLabel);
-
+    // History scrub slider
+    m_quickBar->addWidget(new QLabel(tr(" History:"), this));
     m_undoSlider = new QSlider(Qt::Horizontal, this);
     m_undoSlider->setFixedWidth(120);
     m_undoSlider->setRange(0, 0);
     m_undoSlider->setValue(0);
     m_undoSlider->setToolTip(tr("Drag to scrub through undo history"));
     m_quickBar->addWidget(m_undoSlider);
-
     connect(m_undoSlider, &QSlider::valueChanged,
-            this, &MainWindow::onUndoSliderMoved);
+            this,          &MainWindow::onUndoSliderMoved);
 
+    m_quickBar->addSeparator();
     m_quickBar->addAction(tr("⇄ Flip H"), this, &MainWindow::onFlipH);
     m_quickBar->addSeparator();
 
+    // Zoom spin box
     m_quickBar->addWidget(new QLabel(tr("Zoom:"), this));
     m_zoomSpin = new QSpinBox(this);
     m_zoomSpin->setRange(5, 3200);
@@ -241,29 +246,31 @@ void MainWindow::buildQuickBar()
     m_zoomSpin->setSuffix(tr("%"));
     m_zoomSpin->setFixedWidth(72);
     connect(m_zoomSpin, QOverload<int>::of(&QSpinBox::valueChanged),
-            this, &MainWindow::onQuickZoomChanged);
+            this,        &MainWindow::onQuickZoomChanged);
     m_quickBar->addWidget(m_zoomSpin);
     m_quickBar->addAction(tr("1:1"), this, &MainWindow::onResetZoom);
     m_quickBar->addSeparator();
 
+    // Stabilizer combo
     m_quickBar->addWidget(new QLabel(tr("Stabilizer:"), this));
     m_stabCombo = new QComboBox(this);
     for (int i = 0; i <= 7; ++i)
         m_stabCombo->addItem(QString("S-%1").arg(i));
     m_stabCombo->setFixedWidth(56);
     connect(m_stabCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &MainWindow::onStabilizerChanged);
+            this,         &MainWindow::onStabilizerChanged);
     m_quickBar->addWidget(m_stabCombo);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Status bar  –  Tool · Coords · Pressure · Zoom
 // ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::buildStatusBar()
 {
-    m_statusTool     = new QLabel(tr("Pen · 20 px"), this);
-    m_statusCoord    = new QLabel(tr("X: 0  Y: 0"), this);
-    m_statusPressure = new QLabel(tr("Pressure: 0.00"), this);
+    m_statusTool     = new QLabel(tr("Pen · 20 px"),              this);
+    m_statusCoord    = new QLabel(tr("X: 0  Y: 0"),               this);
+    m_statusPressure = new QLabel(tr("Pressure: 0.00"),           this);
     m_statusZoom     = new QLabel(tr("Zoom: 100%  ·  Rotation: 0°"), this);
 
     statusBar()->addWidget(m_statusTool);
@@ -277,24 +284,32 @@ void MainWindow::buildStatusBar()
 // ─────────────────────────────────────────────────────────────────────────────
 // Signal wiring
 // ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::connectSignals()
 {
+    // Toolbar → brush engine
     connect(m_toolbar, &ToolbarPanel::brushSettingsChanged,
             m_brushEngine, &BrushEngine::setSettings);
     connect(m_toolbar, &ToolbarPanel::colorChanged,
             m_brushEngine, &BrushEngine::setColor);
 
+    // Brush size → status bar
     connect(m_toolbar, &ToolbarPanel::brushSettingsChanged,
             this, [this](const BrushSettings &s) {
         m_statusTool->setText(QString("Pen · %1 px").arg(static_cast<int>(s.size)));
     });
 
-    connect(m_canvas, &CanvasWidget::cursorMoved,  this, &MainWindow::onCursorMoved);
+    // Canvas → status bar / quick bar
+    connect(m_canvas, &CanvasWidget::cursorMoved, this, &MainWindow::onCursorMoved);
     connect(m_canvas, &CanvasWidget::zoomChanged,  this, &MainWindow::onZoomChanged);
 
+    // Undo stack → action enabled state
     connect(m_undoStack, &UndoStack::undoAvailable, m_undoAction, &QAction::setEnabled);
     connect(m_undoStack, &UndoStack::redoAvailable, m_redoAction, &QAction::setEnabled);
-    connect(m_undoStack, &UndoStack::historyChanged, this, [this]() {
+
+    // Undo stack → history slider
+    connect(m_undoStack, &UndoStack::historyChanged, this, [this]()
+    {
         const QSignalBlocker b(m_undoSlider);
         m_undoSlider->setRange(0, qMax(0, m_undoStack->historySize() - 1));
         m_undoSlider->setValue(m_undoStack->currentIndex());
@@ -303,25 +318,27 @@ void MainWindow::connectSignals()
     // ── Google Drive ──────────────────────────────────────────────────────────
     m_driveClient = new GoogleDriveClient(this);
     connect(m_driveClient, &GoogleDriveClient::authenticated,
-        this, &MainWindow::onGDriveAuthenticated);
+            this, &MainWindow::onGDriveAuthenticated);
     connect(m_driveClient, &GoogleDriveClient::authFailed,
-        this, &MainWindow::onGDriveAuthFailed);
+            this, &MainWindow::onGDriveAuthFailed);
     connect(m_driveClient, &GoogleDriveClient::uploadFinished,
-        this, &MainWindow::onGDriveUploadFinished);
+            this, &MainWindow::onGDriveUploadFinished);
 
+    // Layer properties → canvas recomposite
     connect(m_layerStack, &LayerStack::layerPropertiesChanged,
-            m_canvas, &CanvasWidget::forceRecomposite);
+            m_canvas,      &CanvasWidget::forceRecomposite);
 
-    connect(m_canvas, &CanvasWidget::colorPicked,
-            m_toolbar, &ToolbarPanel::onExternalColorChanged);
-
+    // Eyedropper → toolbar + color panel
+    connect(m_canvas,     &CanvasWidget::colorPicked,
+            m_toolbar,    &ToolbarPanel::onExternalColorChanged);
     connect(m_colorPanel, &ColorPanelWidget::colorChanged,
-        m_toolbar, &ToolbarPanel::onExternalColorChanged);
+            m_toolbar,    &ToolbarPanel::onExternalColorChanged);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Keyboard shortcuts not tied to menu actions
 // ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::applyShortcuts()
 {
     new QShortcut(QKeySequence(Qt::Key_B), this, [this]{
@@ -338,6 +355,7 @@ void MainWindow::applyShortcuts()
 // ─────────────────────────────────────────────────────────────────────────────
 // Status bar update slots
 // ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onCursorMoved(QPointF pos, float pressure)
 {
     m_statusCoord->setText(
@@ -357,6 +375,7 @@ void MainWindow::onZoomChanged(float zoom)
 // ─────────────────────────────────────────────────────────────────────────────
 // Quick bar slots
 // ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onQuickZoomChanged(int percent)
 {
     m_canvas->setZoom(percent / 100.0f);
@@ -382,6 +401,7 @@ void MainWindow::onStabilizerChanged(int level)
 // ─────────────────────────────────────────────────────────────────────────────
 // Undo / Redo
 // ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onUndo()
 {
     if (!m_undoStack->canUndo()) return;
@@ -405,6 +425,7 @@ void MainWindow::onRedo()
 // ─────────────────────────────────────────────────────────────────────────────
 // File slots
 // ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onOpen()
 {
     const QString path = QFileDialog::getOpenFileName(
@@ -414,9 +435,10 @@ void MainWindow::onOpen()
            "Images (*.png *.jpg *.jpeg)"));
     if (path.isEmpty()) return;
 
-    const QString ext = QFileInfo(path).suffix().toLower();
-    if (ext == QLatin1String("paint")) {
-        if (!m_projectIO->loadProject(path)) {
+    if (QFileInfo(path).suffix().toLower() == QLatin1String("paint"))
+    {
+        if (!m_projectIO->loadProject(path))
+        {
             QMessageBox::warning(this, tr("Open Failed"),
                                  tr("Could not open project file."));
             return;
@@ -425,10 +447,13 @@ void MainWindow::onOpen()
         m_canvas->reinitCanvas();
         m_canvas->forceRecomposite();
         setWindowTitle(tr("PixelCanvas — %1").arg(QFileInfo(path).fileName()));
-    } else {
-        importPng(path);   // PNG / JPEG path
+    }
+    else
+    {
+        importPng(path);
     }
 }
+
 void MainWindow::onSave()
 {
     if (m_currentFile.isEmpty()) { onSaveAs(); return; }
@@ -443,8 +468,10 @@ void MainWindow::onSaveAs()
     QString path = QFileDialog::getSaveFileName(
         this, tr("Save Project"), dir, tr("PixelCanvas Projects (*.paint)"));
     if (path.isEmpty()) return;
+
     if (!path.endsWith(QLatin1String(".paint"), Qt::CaseInsensitive))
         path += QStringLiteral(".paint");
+
     m_currentFile = path;
     if (!m_projectIO->saveProject(path))
         QMessageBox::warning(this, tr("Save Failed"), tr("Could not save project file."));
@@ -458,39 +485,38 @@ void MainWindow::onExportFlat()
         this, tr("Export Flat Image"), {},
         tr("PNG Image (*.png);;JPEG Image (*.jpg *.jpeg)"));
     if (path.isEmpty()) return;
+
     if (!path.endsWith(QLatin1String(".png"),  Qt::CaseInsensitive) &&
         !path.endsWith(QLatin1String(".jpg"),  Qt::CaseInsensitive) &&
         !path.endsWith(QLatin1String(".jpeg"), Qt::CaseInsensitive))
         path += QStringLiteral(".png");
+
     m_projectIO->exportFlat(path);
 }
 
 void MainWindow::importPng(const QString &path)
 {
     QImage img(path);
-    if (img.isNull()) {
+    if (img.isNull())
+    {
         QMessageBox::warning(this, tr("Import Failed"),
                              tr("Could not read image file."));
         return;
     }
 
-    // Convert to the internal format
     if (img.format() != QImage::Format_ARGB32_Premultiplied)
         img = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
 
-    // Re-initialise the layer stack at the image's size
     m_layerStack->init(img.size());
 
-    // Put the image into the background layer (index 0)
-    Layer *bg = m_layerStack->layerAt(0);
+    Layer *bg  = m_layerStack->layerAt(0);
     bg->pixels = img;
     bg->name   = QFileInfo(path).baseName();
 
-    // Reinit the canvas to match the new size, then repaint
     m_canvas->reinitCanvas();
     m_canvas->forceRecomposite();
 
-    m_currentFile.clear();   // it's an import, not a .paint project
+    m_currentFile.clear();
     setWindowTitle(tr("PixelCanvas — %1 [imported]")
                    .arg(QFileInfo(path).fileName()));
 }
@@ -503,10 +529,15 @@ void MainWindow::onImportPng()
     if (!path.isEmpty()) importPng(path);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
 bool MainWindow::maybeSave()
 {
     if (!m_canvas->isDirty()) return true;
-    const auto btn = QMessageBox::question(this, tr("Unsaved Changes"),
+    const auto btn = QMessageBox::question(
+        this, tr("Unsaved Changes"),
         tr("The canvas has unsaved changes. Save before continuing?"),
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
     if (btn == QMessageBox::Save)    { onSave(); return true; }
@@ -521,16 +552,23 @@ void MainWindow::closeEvent(QCloseEvent *event)
     event->accept();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Undo history slider
+// ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onUndoSliderMoved(int value)
 {
     if (m_undoStack->historySize() == 0) return;
     if (value == m_undoStack->currentIndex()) return;
 
     const int current = m_undoStack->currentIndex();
-    if (value < current) {
+    if (value < current)
+    {
         for (int i = current; i > value && m_undoStack->canUndo(); --i)
             m_undoStack->undo();
-    } else {
+    }
+    else
+    {
         for (int i = current; i < value && m_undoStack->canRedo(); ++i)
             m_undoStack->redo();
     }
@@ -545,6 +583,7 @@ void MainWindow::onUndoSliderMoved(int value)
 // ─────────────────────────────────────────────────────────────────────────────
 // Google Drive
 // ─────────────────────────────────────────────────────────────────────────────
+
 void MainWindow::onUploadToDrive()
 {
     // If there's no saved file yet, do a local save first
@@ -565,7 +604,6 @@ void MainWindow::onGDriveAuthFailed(const QString &msg)
     // Device flow sends a special "DEVICE_CODE:code:url" message
     if (msg.startsWith("DEVICE_CODE:")) {
         const QStringList parts = msg.split(':');
-        // parts[1] = user code, parts[2]+ = url
         const QString userCode = parts.value(1);
         QMessageBox::information(this, tr("Google Drive Login"),
             tr("A browser window has opened.\n\n"

@@ -1,14 +1,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ProjectIO  –  scratchpad persistence additions (Phase 12)
 //
-// Add these fragments to your existing ProjectIO::saveProject() and
+// Add these fragments to the existing ProjectIO::saveProject() and
 // loadProject() implementations.  The scratchpad image is stored as
 // "scratch.png" inside the .paint ZIP archive alongside the layer PNGs.
-//
-// In saveProject() — after saving layer PNGs, before closing the ZIP:
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── In saveProject() ─────────────────────────────────────────────────────────
+// ── In saveProject()  (after saving layer PNGs, before closing the ZIP) ──────
 //
 //   QImage scratchImg = m_colorSwatchWidget->scratchImage();
 //   if (!scratchImg.isNull())
@@ -18,10 +16,10 @@
 //       buf.open(QIODevice::WriteOnly);
 //       scratchImg.save(&buf, "PNG");
 //       buf.close();
-//       zip.addFile("scratch.png", pngData);   // your zip helper
+//       zip.addFile("scratch.png", pngData);
 //   }
 //
-//   // Also persist swatch colours in project.json:
+//   // Persist swatch colours in project.json:
 //   QJsonArray swatchArr;
 //   for (const QColor &c : m_colorSwatchWidget->swatches())
 //       swatchArr.append(c.isValid() ? c.name() : QString());
@@ -30,7 +28,7 @@
 
 // ── In loadProject() ─────────────────────────────────────────────────────────
 //
-//   // Restore swatches from JSON
+//   // Restore swatches from JSON.
 //   if (root.contains("swatches"))
 //   {
 //       const QJsonArray arr = root["swatches"].toArray();
@@ -43,10 +41,10 @@
 //       m_colorSwatchWidget->setSwatches(swatches);
 //   }
 //
-//   // Restore scratch image
+//   // Restore scratch image.
 //   if (zip.hasFile("scratch.png"))
 //   {
-//       QByteArray pngData = zip.readFile("scratch.png");
+//       const QByteArray pngData = zip.readFile("scratch.png");
 //       QImage img;
 //       img.loadFromData(pngData, "PNG");
 //       if (!img.isNull())
@@ -55,16 +53,15 @@
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// JSON schema addition
+// Extended project.json schema
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// project.json (extended):
 // {
-//   "version": 1,
-//   "canvasWidth": 2048,
+//   "version":      1,
+//   "canvasWidth":  2048,
 //   "canvasHeight": 2048,
-//   "layers": [ ... ],
-//   "swatches": ["#ff0000", "#00ff00", "", "", ...]   ← "" means empty slot
+//   "layers":       [ ... ],
+//   "swatches":     ["#ff0000", "#00ff00", "", "", ...]   // "" = empty slot
 // }
 //
-// scratch.png  ← added to the ZIP root alongside layer_0.png etc.
+// scratch.png is added to the ZIP root alongside layer_0.png etc.

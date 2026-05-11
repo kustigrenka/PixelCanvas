@@ -4,11 +4,19 @@
 #include <QVector>
 #include <QImage>
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Snapshot  –  a full copy of one layer's pixels at a point in time
+// ─────────────────────────────────────────────────────────────────────────────
+
 struct Snapshot
 {
     int    layerIndex = 0;
     QImage pixels;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UndoStack
+// ─────────────────────────────────────────────────────────────────────────────
 
 class UndoStack : public QObject
 {
@@ -27,9 +35,9 @@ public:
     Snapshot undo();
     Snapshot redo();
 
-    // For the history slider
-    int  historySize()   const { return m_snapshots.size(); }
-    int  currentIndex()  const { return m_cursor; }
+    // ── History slider support ────────────────────────────────────────────────
+    int      historySize()   const { return m_snapshots.size(); }
+    int      currentIndex()  const { return m_cursor; }
     Snapshot snapshotAt(int index) const { return m_snapshots.value(index); }
 
     int peekUndoLayerIndex() const { return canUndo() ? m_snapshots[m_cursor - 1].layerIndex : 0; }
@@ -40,9 +48,9 @@ public:
 signals:
     void undoAvailable(bool available);
     void redoAvailable(bool available);
-    void historyChanged();   // emitted on push/undo/redo/clear — slider listens to this
+    void historyChanged();   // emitted on push / undo / redo / clear
 
 private:
     QVector<Snapshot> m_snapshots;
-    int               m_cursor = -1;   // points to current state, -1 = empty
+    int               m_cursor = -1;   // points to current state; -1 = empty
 };

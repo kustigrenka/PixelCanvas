@@ -12,6 +12,10 @@ class QComboBox;
 class QPushButton;
 class QToolButton;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LayerPanel  (Member 4)
+// ─────────────────────────────────────────────────────────────────────────────
+
 class LayerPanel : public QWidget
 {
     Q_OBJECT
@@ -26,22 +30,22 @@ private slots:
     void onDuplicateLayer();
     void onLayerSelected(int row);
     void onRowsMoved(const QModelIndex &parent, int srcRow, int srcEnd,
-                     const QModelIndex &dst, int dstRow);
+                     const QModelIndex &dst,    int dstRow);
     void onOpacityChanged(int value);
     void onBlendModeChanged(int index);
     void onVisibilityToggled();
 
 private:
-    void buildUi();
+    void    buildUi();
     QFrame *buildSeparator();
 
-    LayerStack   *m_layerStack      = nullptr;
-    QListWidget  *m_layerList       = nullptr;
-    QSlider      *m_opacitySlider   = nullptr;
-    QSpinBox     *m_opacitySpin     = nullptr;
-    QComboBox    *m_blendCombo      = nullptr;
-    QPushButton  *m_addBtn          = nullptr;
-    QPushButton  *m_removeBtn       = nullptr;
-    QPushButton  *m_dupBtn          = nullptr;
-    QToolButton  *m_visBtn          = nullptr;
+    LayerStack  *m_layerStack    = nullptr;
+    QListWidget *m_layerList     = nullptr;
+    QSlider     *m_opacitySlider = nullptr;
+    QSpinBox    *m_opacitySpin   = nullptr;
+    QComboBox   *m_blendCombo    = nullptr;
+    QPushButton *m_addBtn        = nullptr;
+    QPushButton *m_removeBtn     = nullptr;
+    QPushButton *m_dupBtn        = nullptr;
+    QToolButton *m_visBtn        = nullptr;
 };

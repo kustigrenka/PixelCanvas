@@ -6,11 +6,11 @@ UndoStack::UndoStack(QObject *parent)
 
 void UndoStack::pushSnapshot(int layerIndex, const QImage &pixels)
 {
-    // Discard redo history ahead of cursor
+    // Discard redo history ahead of the cursor.
     if (m_cursor < m_snapshots.size() - 1)
         m_snapshots.resize(m_cursor + 1);
 
-    // Enforce cap — keep one extra slot for the "before" state
+    // Enforce the history cap — keep one extra slot for the "before" state.
     if (m_snapshots.size() >= kMaxSteps)
         m_snapshots.removeFirst();
 

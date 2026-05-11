@@ -24,7 +24,9 @@ void LayerStack::init(const QSize &canvasSize)
     emit layersChanged();
 }
 
-// ─── Layer management ────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Layer management
+// ─────────────────────────────────────────────────────────────────────────────
 
 int LayerStack::addLayer(const QString &name)
 {
@@ -41,6 +43,7 @@ int LayerStack::addLayer(const QString &name)
 void LayerStack::removeLayer(int index)
 {
     if (index < 0 || index >= m_layers.size() || m_layers.size() <= 1) return;
+
     delete m_layers.takeAt(index);
     m_activeIndex = std::clamp(m_activeIndex, 0, (int)m_layers.size() - 1);
     emit layersChanged();
@@ -49,13 +52,15 @@ void LayerStack::removeLayer(int index)
 int LayerStack::duplicateLayer(int index)
 {
     if (index < 0 || index >= m_layers.size()) return -1;
+
     const Layer *src = m_layers[index];
-    auto *dup = new Layer;
+    auto *dup        = new Layer;
     dup->pixels    = src->pixels.copy();
     dup->name      = src->name + " copy";
     dup->opacity   = src->opacity;
     dup->blendMode = src->blendMode;
     dup->visible   = src->visible;
+
     m_layers.insert(index + 1, dup);
     emit layersChanged();
     return index + 1;
@@ -86,11 +91,14 @@ Layer *LayerStack::layerAt(int index)
     return m_layers[index];
 }
 
-// ─── Canvas size operations ───────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Canvas size operations
+// ─────────────────────────────────────────────────────────────────────────────
 
 void LayerStack::resizeCanvas(const QSize &newSize, const QPoint &anchor)
 {
-    for (Layer *layer : m_layers) {
+    for (Layer *layer : m_layers)
+    {
         QImage newPixels(newSize, QImage::Format_ARGB32_Premultiplied);
         newPixels.fill(Qt::transparent);
         QPainter p(&newPixels);
@@ -109,7 +117,9 @@ void LayerStack::extendCanvas(int left, int top, int right, int bottom)
     resizeCanvas(newSize, QPoint(left, top));
 }
 
-// ─── Compositing ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Compositing
+// ─────────────────────────────────────────────────────────────────────────────
 
 void LayerStack::recompositeRect(QImage &dest, const QRect &dirty)
 {
@@ -119,27 +129,28 @@ void LayerStack::recompositeRect(QImage &dest, const QRect &dirty)
     QPainter p(&dest);
 
     // ── 1. Fill with canvas background (white) ────────────────────────────────
-    // Must use CompositionMode_Source so we fully overwrite dest pixels —
-    // including any alpha from a previous eraser stroke.  Without this,
-    // erased (transparent) pixels on the active layer composite onto stale
-    // dest content instead of the white background.
+    // CompositionMode_Source fully overwrites dest pixels — including any alpha
+    // left by a previous eraser stroke.  Without this, erased (transparent)
+    // pixels composite onto stale dest content instead of the white background.
     p.setCompositionMode(QPainter::CompositionMode_Source);
     p.fillRect(region, Qt::white);
 
     // ── 2. Composite each visible layer in order ──────────────────────────────
-    for (const Layer *layer : m_layers) {
+    for (const Layer *layer : m_layers)
+    {
         if (!layer->visible) continue;
         p.setOpacity(layer->opacity);
         p.setCompositionMode(layer->blendMode);
-        // Draw only the dirty sub-region from the layer
         p.drawImage(region.topLeft(), layer->pixels, region);
     }
 
-    // Reset opacity so nothing downstream is affected
+    // Reset opacity so nothing downstream is affected.
     p.setOpacity(1.0);
 }
 
-// ─── Filter ──────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Filter
+// ─────────────────────────────────────────────────────────────────────────────
 
 void LayerStack::applyFilterToActive(Filter *filter)
 {

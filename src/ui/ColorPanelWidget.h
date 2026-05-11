@@ -9,6 +9,10 @@ class ColorSwatchWidget;
 class ScratchPadWidget;
 class BrushEngine;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ColorPanelWidget  –  accordion container for all colour sub-panels
+// ─────────────────────────────────────────────────────────────────────────────
+
 class ColorPanelWidget : public QWidget
 {
     Q_OBJECT
