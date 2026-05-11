@@ -4,7 +4,7 @@
 Built with C++20 · Qt6 · OpenCV
 
 > A student-led engineering project — UFAZ (Université Franco-Azerbaïdjanaise) — 2026  
-> *Madina Mammadova · Fakhriyya Huseynova · Farida Orujova · Tamilla Iskandarova*
+> *Tamilla Iskandarova · Madina Mammadova · Fakhriyya Huseynova · Farida Orujova*
 
 ---
 
@@ -34,6 +34,7 @@ Microsoft Paint and similar consumer tools are built for casual use: flat colour
 | **Colour precision** | Full HSV colour wheel, six interactive RGB/HSV gradient sliders, 100-slot persistent swatch palette, and a live colour readout. |
 | **Canvas operations** | New, Resize, Extend, and Crop dialogs with pixel-precise input and a 9-point anchor grid. Canvas sizes up to 16384×16384 px. |
 | **Export** | Flat PNG/JPEG export plus the native `.paint` format (ZIP-archived per-layer PNGs + `project.json`) for full round-trip fidelity. |
+| **Cloud backup** | Google Drive integration for uploading the current project directly from within the application via OAuth2. |
 
 ---
 
@@ -104,6 +105,12 @@ All filters operate on a copy of the active layer. An undo snapshot is pushed be
 - Variable playback speed (0.25× to 16×)
 - Frame-by-frame PNG export for video production
 
+### Google Drive Integration
+ 
+- OAuth2 authentication flow handled by `GoogleDriveClient`
+- Upload the current `.paint` project or a flat exported image directly to Google Drive without leaving the application
+
+
 ---
 
 ## Project Structure
@@ -131,6 +138,8 @@ pixel_canvas/
     ├── filters/
     │   ├── Filter.h                  Abstract Filter interface
     │   └── FilterImpls.cpp           Blur, BrightnessContrast, Sharpen, Invert via OpenCV
+    ├── googledrive/
+    │   └── GoogleDriveClient.h/.cpp  OAuth2 authentication and flat-file upload to Google Drive
     ├── io/
     │   └── ProjectIO.h/.cpp          Save/load .paint (ZIP); flat PNG/JPEG export
     └── ui/
@@ -201,10 +210,10 @@ Developed as a student-led engineering project at UFAZ (Université Franco-Azerb
 
 | Name | |
 |---|---|
+| **Tamilla Iskandarova** | |
 | **Madina Mammadova** | |
 | **Fakhriyya Huseynova** | |
 | **Farida Orujova** | |
-| **Tamilla Iskandarova** | |
 
 ---
 
