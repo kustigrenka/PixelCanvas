@@ -37,11 +37,16 @@ GoogleDriveClient::GoogleDriveClient(QObject *parent)
 
     // Restore saved tokens
     QSettings s("YourOrg", "YourApp");
-    m_accessToken  = s.value("gdrive/access_token").toString();
-    m_refreshToken = s.value("gdrive/refresh_token").toString();
+    m_accessToken   = s.value("gdrive/access_token").toString();
+    m_refreshToken  = s.value("gdrive/refresh_token").toString();
     m_driveFolderId = s.value("gdrive/folder_id").toString();
-}
 
+    // ← add this: silently refresh on startup if we have a refresh token
+    if (!m_refreshToken.isEmpty()) {
+        refreshAccessToken();
+    }
+
+}
 // ─────────────────────────────────────────────────────────────────────────────
 bool GoogleDriveClient::isAuthenticated() const
 {
@@ -208,9 +213,9 @@ void GoogleDriveClient::onRefreshReply()
         QJsonDocument::fromJson(reply->readAll()).object();
 
     if (obj.contains("error")) {
-        // Refresh token expired — need full re-auth
+        // Refresh token expired — need full re-auth via browser
         logout();
-        requestDeviceCode();
+        requestDeviceCode();   // this now uses localhost:8080 flow
         return;
     }
 
@@ -262,8 +267,7 @@ void GoogleDriveClient::ensureDriveFolder()
 void GoogleDriveClient::onFolderReply()
 {
     auto *reply = qobject_cast<QNetworkReply *>(sender());
-    reply->deleteLater();
-
+       
     if (reply->error() != QNetworkReply::NoError) {
         // Access token may have expired — refresh and retry
         if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 401) {
