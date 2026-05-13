@@ -583,13 +583,12 @@ void MainWindow::onUndoSliderMoved(int value)
 // ─────────────────────────────────────────────────────────────────────────────
 // Google Drive
 // ─────────────────────────────────────────────────────────────────────────────
-
 void MainWindow::onUploadToDrive()
 {
-    // If there's no saved file yet, do a local save first
+
     if (m_currentFile.isEmpty()) {
         onSaveAs();
-        if (m_currentFile.isEmpty()) return; // user cancelled
+        if (m_currentFile.isEmpty()) return;
     }
     m_driveClient->uploadFile(m_currentFile);
 }
